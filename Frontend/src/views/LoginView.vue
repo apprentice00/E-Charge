@@ -1,7 +1,7 @@
 <template>
   <div class="login-container">
     <div class="login-card">
-      <h1 class="title">充电站管理系统</h1>
+      <h1 class="title">E-Charge</h1>
       <div class="form-group">
         <label for="username">用户名</label>
         <input 
@@ -21,24 +21,6 @@
           placeholder="请输入密码"
           @keyup.enter="handleLogin"
         />
-      </div>
-      <div class="user-type">
-        <label>
-          <input 
-            type="radio" 
-            v-model="userType" 
-            value="user" 
-            name="userType"
-          /> 用户
-        </label>
-        <label>
-          <input 
-            type="radio" 
-            v-model="userType" 
-            value="admin" 
-            name="userType"
-          /> 管理员
-        </label>
       </div>
       <div class="button-group">
         <button 
@@ -70,53 +52,47 @@ import { useRouter } from 'vue-router'
 const router = useRouter()
 const username = ref('')
 const password = ref('')
-const userType = ref('user') // 默认为普通用户
 const isLoading = ref(false)
 const errorMessage = ref('')
 
-// 模拟用户账号数据
-const mockUsers = [
-  { username: 'user', password: '123', type: 'user' },
-  { username: 'admin', password: '123', type: 'admin' }
-]
-
+// 登录逻辑：向后端发送用户名和密码，后端返回type
 const handleLogin = async () => {
   if (!username.value || !password.value) {
     errorMessage.value = '请输入用户名和密码'
     return
   }
-  
+
   try {
     isLoading.value = true
     errorMessage.value = ''
-    
-    // 模拟登录请求
-    await new Promise(resolve => setTimeout(resolve, 1000))
-    
-    // 验证用户账号和密码
-    const user = mockUsers.find(
-      u => u.username === username.value && 
-           u.password === password.value &&
-           u.type === userType.value
-    )
-    
-    if (user) {
+
+    // 发送登录请求到后端
+    const response = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: username.value,
+        password: password.value
+      })
+    })
+
+    const data = await response.json()
+
+    if (response.ok && data.type) {
       // 登录成功，保存用户信息到 localStorage
       localStorage.setItem('currentUser', JSON.stringify({
-        username: user.username,
-        type: user.type
+        username: username.value,
+        type: data.type
       }))
-      
-      // 根据用户类型跳转到不同页面
-      if (user.type === 'admin') {
+      // 根据type跳转
+      if (data.type === 'admin') {
         router.push('/admin-dashboard')
       } else {
         router.push('/user-dashboard')
       }
     } else {
-      errorMessage.value = '用户名或密码错误，或用户类型不匹配'
+      errorMessage.value = data.message || '用户名或密码错误'
     }
-    
   } catch (error) {
     errorMessage.value = '登录失败，请检查用户名和密码'
     console.error('登录错误:', error)
@@ -243,30 +219,6 @@ input[type="password"]:focus {
   outline: none;
   background-color: white;
   box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.1);
-}
-
-.user-type {
-  display: flex;
-  gap: 30px;
-  margin-bottom: 25px;
-  justify-content: center;
-}
-
-.user-type label {
-  display: flex;
-  align-items: center;
-  cursor: pointer;
-  font-size: 15px;
-  font-weight: 500;
-  color: var(--text-color);
-}
-
-.user-type input {
-  margin-right: 8px;
-  cursor: pointer;
-  accent-color: var(--primary-color);
-  width: 18px;
-  height: 18px;
 }
 
 .button-group {
