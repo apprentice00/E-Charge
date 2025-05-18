@@ -32,24 +32,6 @@
           @keyup.enter="handleRegister"
         />
       </div>
-      <div class="user-type">
-        <label>
-          <input 
-            type="radio" 
-            v-model="userType" 
-            value="user" 
-            name="userType"
-          /> 用户
-        </label>
-        <label>
-          <input 
-            type="radio" 
-            v-model="userType" 
-            value="admin" 
-            name="userType"
-          /> 管理员
-        </label>
-      </div>
       <div class="button-group">
         <button 
           class="register-button" 
@@ -76,12 +58,12 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import axios from 'axios'
 
 const router = useRouter()
 const username = ref('')
 const password = ref('')
 const confirmPassword = ref('')
-const userType = ref('user') // 默认为普通用户
 const isLoading = ref(false)
 const errorMessage = ref('')
 
@@ -106,12 +88,19 @@ const handleRegister = async () => {
     isLoading.value = true
     errorMessage.value = ''
     
-    // 模拟注册请求
-    await new Promise(resolve => setTimeout(resolve, 1000))
+    // 发送注册请求到后端
+    const response = await axios.post('/api/register', {
+      username: username.value,
+      password: password.value,
+      type: 'user'
+    })
     
-    // 模拟注册成功，跳转到登录页
-    alert('注册成功，请使用新账号登录')
-    router.push('/')
+    if (response.data.success) {
+      alert('注册成功，请使用新账号登录')
+      router.push('/')
+    } else {
+      errorMessage.value = response.data.message || '注册失败，请稍后再试'
+    }
     
   } catch (error) {
     errorMessage.value = '注册失败，请稍后再试'
@@ -240,30 +229,6 @@ input[type="password"]:focus {
   outline: none;
   background-color: white;
   box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.1);
-}
-
-.user-type {
-  display: flex;
-  gap: 30px;
-  margin-bottom: 25px;
-  justify-content: center;
-}
-
-.user-type label {
-  display: flex;
-  align-items: center;
-  cursor: pointer;
-  font-size: 15px;
-  font-weight: 500;
-  color: var(--text-color);
-}
-
-.user-type input {
-  margin-right: 8px;
-  cursor: pointer;
-  accent-color: var(--primary-color);
-  width: 18px;
-  height: 18px;
 }
 
 .button-group {

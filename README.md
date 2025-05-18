@@ -1,6 +1,7 @@
 ### 环境
 * node.js
 * vue3
+* npm install axios
 * python
 * flask flask-cors
 
