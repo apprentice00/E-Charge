@@ -28,3 +28,6 @@ python app.py
 数据：
 * frontend send {username, password}
 * backend return {type}
+
+#### 注册
+只能注册用户
