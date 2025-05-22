@@ -50,7 +50,7 @@
         <div class="dashboard-section">
           <div class="section-title">
             <h2>充电桩管理</h2>
-            <div class="subtitle">查看和控制充电桩状态</div>
+            <!-- <div class="subtitle">查看和控制充电桩状态</div> -->
           </div>
 
           <div class="pile-management">
@@ -100,7 +100,7 @@
         <div class="dashboard-section">
           <div class="section-title">
             <h2>车辆等待队列</h2>
-            <div class="subtitle">查看等候服务的车辆信息</div>
+            <!-- <div class="subtitle">查看等候服务的车辆信息</div> -->
           </div>
 
           <div class="waiting-queue">
@@ -137,7 +137,7 @@
     <div class="dashboard-section full-width">
       <div class="section-title">
         <h2>充电数据报表</h2>
-        <div class="subtitle">查看充电统计数据</div>
+        <!-- <div class="subtitle">查看充电统计数据</div> -->
       </div>
 
       <div class="report-section">
@@ -224,7 +224,11 @@
                 class="chart-bar"
                 :style="{ height: getBarHeight(report) }"
               >
-                <div class="bar-value">{{ getChartValue(report) }}</div>
+                <div class="bar-value">
+                  <span v-if="chartType === 'charges'">{{ report.totalCharges }}</span>
+                  <span v-else-if="chartType === 'energy'">{{ report.totalEnergy }}<span class="unit">kW·h</span></span>
+                  <span v-else>¥{{ report.totalFee }}</span>
+                </div>
               </div>
             </div>
             <div class="chart-labels">
@@ -1046,6 +1050,8 @@ html, body {
   background-color: rgba(0, 0, 0, 0.02);
   border-radius: 0.8rem;
   padding: 1.2rem;
+  justify-content: space-between;
+  align-items: flex-end;
 }
 
 .filter-group {
@@ -1070,70 +1076,93 @@ html, body {
 }
 
 .generate-button {
-  margin-top: auto;
   padding: 0.7rem 1.5rem;
-  background-color: var(--admin-primary-color);
-  color: white;
-  border: none;
+  background-color: #fff;
+  color: var(--admin-primary-color);
+  border: 1.5px solid var(--admin-primary-color);
   border-radius: 0.5rem;
-  font-size: 0.9rem;
-  font-weight: 500;
+  font-size: 1rem;
+  font-weight: 600;
   cursor: pointer;
+  box-shadow: 0 2px 8px rgba(25, 118, 210, 0.08);
   transition: all var(--transition-time);
+  margin-left: auto;
 }
 
 .generate-button:hover {
-  background-color: var(--admin-primary-dark);
-  transform: translateY(-2px);
+  background-color: #fff;
+  color: var(--admin-primary-color);
+  border-color: var(--admin-primary-dark);
+  transform: translateY(-2px) scale(1.04);
+  box-shadow: 0 4px 16px rgba(25, 118, 210, 0.15);
 }
 
 /* 图表区域 */
 .chart-container {
   margin-top: 1rem;
-  background-color: rgba(0, 0, 0, 0.02);
-  border-radius: 0.8rem;
-  padding: 1.5rem;
+  background-color: #fff;
+  border-radius: 1.2rem;
+  padding: 2rem 2.5rem 2.5rem 2.5rem;
+  box-shadow: 0 4px 24px rgba(25, 118, 210, 0.08);
+  position: relative;
 }
 
 .chart-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1.5rem;
+  align-items: flex-start;
+  margin-bottom: 2rem;
 }
 
 .chart-header h3 {
-  font-size: 1.1rem;
+  font-size: 1.3rem;
   margin: 0;
   color: var(--text-color);
-  font-weight: 600;
+  font-weight: 700;
+  letter-spacing: 0.5px;
 }
 
 .chart-selector {
   display: flex;
-  gap: 0.5rem;
+  gap: 1rem;
+  background: #fafbfc;
+  border-radius: 0.8rem;
+  padding: 0.5rem 1rem;
+  box-shadow: 0 2px 8px rgba(25, 118, 210, 0.04);
 }
 
 .chart-type-btn {
-  padding: 0.5rem 1rem;
-  border: 1px solid var(--border-color);
-  background-color: white;
+  padding: 0.5rem 1.3rem;
+  border: 1.5px solid var(--admin-primary-color);
+  background-color: #fff;
   border-radius: 0.5rem;
-  font-size: 0.9rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--admin-primary-color);
   cursor: pointer;
   transition: all 0.2s;
+  outline: none;
+  box-shadow: none;
+}
+
+.chart-type-btn:not(.active):hover {
+  background: #f0f6ff;
+  border-color: var(--admin-primary-dark);
 }
 
 .chart-type-btn.active {
-  background-color: var(--admin-primary-color);
-  color: white;
-  border-color: var(--admin-primary-color);
+  background-color: #e3f0fd;
+  color: var(--admin-primary-color);
+  border-color: var(--admin-primary-dark);
+  box-shadow: 0 2px 8px rgba(25, 118, 210, 0.10);
+  font-size: 1.15rem;
 }
 
 .chart-placeholder {
-  height: 300px;
+  height: 320px;
   display: flex;
   flex-direction: column;
+  justify-content: flex-end;
 }
 
 .chart-bars {
@@ -1141,41 +1170,55 @@ html, body {
   display: flex;
   justify-content: space-around;
   align-items: flex-end;
-  gap: 1rem;
+  gap: 2.5rem;
   padding: 0 1rem;
 }
 
 .chart-bar {
-  flex: 1;
-  background-color: var(--admin-primary-color);
-  border-radius: 4px 4px 0 0;
-  min-height: 20px;
+  flex: 0 1 60px;
+  max-width: 60px;
+  background: #90caf9;
+  border-radius: 12px 12px 0 0;
+  min-height: 24px;
   display: flex;
   justify-content: center;
   position: relative;
-  transition: height 0.5s ease;
+  transition: height 0.5s cubic-bezier(.4,2,.6,1);
+  margin: 0 0.7rem;
+  box-shadow: 0 2px 8px rgba(66, 165, 245, 0.10);
 }
 
 .bar-value {
   position: absolute;
-  top: -25px;
+  top: -18px;
+  left: 50%;
+  transform: translateX(-50%);
   font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--text-color);
+  font-weight: 500;
+  color: #333;
+  text-shadow: none;
+}
+
+.bar-value .unit {
+  font-size: 0.8em;
+  margin-left: 1px;
+  vertical-align: baseline;
 }
 
 .chart-labels {
-  height: 30px;
+  height: 36px;
   display: flex;
   justify-content: space-around;
+  align-items: flex-end;
 }
 
 .chart-label {
   flex: 1;
   text-align: center;
-  font-size: 0.8rem;
+  font-size: 1rem;
   color: var(--light-text);
   padding: 0.5rem 0;
+  font-weight: 500;
 }
 
 /* 响应式适配 */
