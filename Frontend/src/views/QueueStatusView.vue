@@ -103,14 +103,14 @@
           <div class="charger-list">
             <div 
               v-for="charger in chargers" 
-              :key="charger.id"
+              :key="charger.pileId"
               class="charger-item"
-              :class="{ 'charger-busy': !charger.available }"
+              :class="{ 'charger-busy': charger.status !== 'AVAILABLE' }"
             >
               <div class="charger-name">{{ charger.name }}</div>
               <div class="charger-type">{{ charger.type === 'fast' ? '快充' : '慢充' }}</div>
               <div class="charger-availability">
-                {{ charger.available ? '可用' : '使用中' }}
+                {{ charger.status === 'AVAILABLE' ? '可用' : charger.status === 'IN_USE' ? '使用中' : '故障' }}
               </div>
             </div>
           </div>
@@ -134,13 +134,6 @@ interface ChargingPile {
   type: 'fast' | 'slow'
 }
 
-interface Charger {
-  id: string
-  name: string
-  available: boolean
-  type: 'fast' | 'slow'
-}
-
 interface QueueStatus {
   chargeType: string
   queueNumber: string
@@ -149,6 +142,12 @@ interface QueueStatus {
   position: number
   estimatedWaitTime: number
   requestId: string
+}
+
+interface ChargeAreaStatus {
+  queueCarCount: number
+  chargingCarCount: number
+  piles: ChargingPile[]
 }
 
 const router = useRouter()
@@ -160,7 +159,7 @@ const hasRequest = ref(false)
 const chargeMode = ref<'fast' | 'slow'>('fast')
 const queueNumber = ref('')
 const chargeAmount = ref(0)
-const status = ref<'waiting' | 'charging' | null>(null)
+const status = ref<'WAITING' | 'CHARGING' | 'FINISHED' | 'CANCELLED' | null>(null)
 const queuePosition = ref(0)
 const estimatedWaitTime = ref('')
 const requestId = ref('')
@@ -170,14 +169,16 @@ const waitingCount = ref(0)
 const chargingCount = ref(0)
 
 // 充电桩数据
-const chargers = ref<Charger[]>([])
+const chargers = ref<ChargingPile[]>([])
 
 // 计算属性
 const statusText = computed(() => {
   if (!status.value) return '未知'
   switch (status.value) {
-    case 'waiting': return '排队等候中'
-    case 'charging': return '充电中'
+    case 'WAITING': return '排队等候中'
+    case 'CHARGING': return '充电中'
+    case 'FINISHED': return '已完成'
+    case 'CANCELLED': return '已取消'
     default: return '未知'
   }
 })
@@ -185,14 +186,16 @@ const statusText = computed(() => {
 const statusClass = computed(() => {
   if (!status.value) return ''
   switch (status.value) {
-    case 'waiting': return 'status-waiting'
-    case 'charging': return 'status-charging'
+    case 'WAITING': return 'status-waiting'
+    case 'CHARGING': return 'status-charging'
+    case 'FINISHED': return 'status-finished'
+    case 'CANCELLED': return 'status-cancelled'
     default: return ''
   }
 })
 
 const canEdit = computed(() => {
-  return status.value === 'waiting'
+  return status.value === 'WAITING'
 })
 
 // 获取排队状态
@@ -211,12 +214,12 @@ const fetchQueueStatus = async () => {
     })
 
     if (response.data.code === 200) {
-      const data = response.data.data
+      const data: QueueStatus = response.data.data
       hasRequest.value = true
       chargeMode.value = data.chargeType === '快充模式' ? 'fast' : 'slow'
       queueNumber.value = data.queueNumber
       chargeAmount.value = data.targetAmount
-      status.value = data.status === 'WAITING' ? 'waiting' : 'charging'
+      status.value = data.status
       queuePosition.value = data.position
       estimatedWaitTime.value = `约 ${data.estimatedWaitTime} 分钟`
       requestId.value = data.requestId
@@ -235,15 +238,10 @@ const fetchChargeAreaStatus = async () => {
     const response = await axios.get(`${API_BASE_URL}/api/queue/charge-area`)
     
     if (response.data.code === 200) {
-      const data = response.data.data
+      const data: ChargeAreaStatus = response.data.data
       waitingCount.value = data.queueCarCount
       chargingCount.value = data.chargingCarCount
-      chargers.value = data.piles.map((pile: ChargingPile) => ({
-        id: pile.pileId,
-        name: pile.name,
-        available: pile.status === 'AVAILABLE',
-        type: pile.type
-      }))
+      chargers.value = data.piles
     }
   } catch (error) {
     console.error('获取充电区状态失败:', error)
@@ -282,7 +280,6 @@ const cancelRequest = async () => {
     
     const user = JSON.parse(userJson)
     const response = await axios.post(`${API_BASE_URL}/api/queue/cancel`, {
-      username: user.username,
       requestId: requestId.value
     }, {
       headers: {
@@ -505,7 +502,7 @@ onMounted(() => {
   font-weight: 600;
 }
 
-.status-waiting, .status-charging {
+.status-waiting, .status-charging, .status-finished, .status-cancelled {
   padding: 4px 8px;
   border-radius: 4px;
   display: inline-block;
@@ -519,6 +516,16 @@ onMounted(() => {
 .status-charging {
   background-color: #d4edda;
   color: #155724;
+}
+
+.status-finished {
+  background-color: #d1e7dd;
+  color: #0f5132;
+}
+
+.status-cancelled {
+  background-color: #f8d7da;
+  color: #842029;
 }
 
 .action-section {

@@ -70,9 +70,9 @@
         </div>
       </div>
 
-      <div v-for="record in records" :key="record.id" class="record-card">
+      <div v-for="record in records" :key="record.recordId" class="record-card">
         <div class="record-header">
-          <div class="record-id">详单编号: {{ record.id }}</div>
+          <div class="record-id">详单编号: {{ record.recordId }}</div>
           <div class="record-status" :class="getStatusClass(record.status)">
             {{ getStatusText(record.status) }}
           </div>
@@ -86,15 +86,15 @@
             </div>
             <div class="record-item">
               <div class="record-label">充电量</div>
-              <div class="record-value">{{ record.chargeAmount }} 度</div>
+              <div class="record-value">{{ record.energyAmount }} 度</div>
             </div>
             <div class="record-item">
               <div class="record-label">充电时长</div>
-              <div class="record-value">{{ record.chargeDuration }}</div>
+              <div class="record-value">{{ record.duration }}</div>
             </div>
             <div class="record-item">
               <div class="record-label">详单生成时间</div>
-              <div class="record-value">{{ formatDate(record.createdAt) }}</div>
+              <div class="record-value">{{ formatDate(record.startTime) }}</div>
             </div>
           </div>
           
@@ -154,6 +154,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import axios from 'axios'
+import { API_BASE_URL } from '../config'
 
 const router = useRouter()
 const loading = ref(true)
@@ -166,7 +168,7 @@ const sortOrder = ref('newest')
 // 分页
 const currentPage = ref(1)
 const totalPages = ref(1)
-const pageSize = 5
+const pageSize = 10
 
 // 统计数据
 const summary = ref({
@@ -177,173 +179,167 @@ const summary = ref({
 
 // 详单记录
 interface BillRecord {
-  id: string
+  recordId: string
   pileName: string
-  chargeAmount: number
-  chargeDuration: string
-  createdAt: string
+  pileId: string
+  energyAmount: number
   startTime: string
   endTime: string
+  duration: string
   chargeCost: number
   serviceCost: number
   totalCost: number
-  status: 'completed' | 'interrupted' | 'cancelled'
+  status: 'COMPLETED' | 'INTERRUPTED' | 'CANCELLED'
 }
 
 const records = ref<BillRecord[]>([])
 
-// 模拟数据加载
-onMounted(() => {
-  fetchRecords()
-})
+// 获取日期范围
+const getDateRange = () => {
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  
+  switch (dateRange.value) {
+    case 'today':
+      return {
+        startDate: today.toISOString().split('T')[0],
+        endDate: today.toISOString().split('T')[0]
+      }
+    case 'week':
+      const weekStart = new Date(today)
+      weekStart.setDate(today.getDate() - today.getDay())
+      const weekEnd = new Date(weekStart)
+      weekEnd.setDate(weekStart.getDate() + 6)
+      return {
+        startDate: weekStart.toISOString().split('T')[0],
+        endDate: weekEnd.toISOString().split('T')[0]
+      }
+    case 'month':
+      const monthStart = new Date(today.getFullYear(), today.getMonth(), 1)
+      const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0)
+      return {
+        startDate: monthStart.toISOString().split('T')[0],
+        endDate: monthEnd.toISOString().split('T')[0]
+      }
+    default:
+      return {
+        startDate: '',
+        endDate: ''
+      }
+  }
+}
+
+// 获取排序参数
+const getSortBy = () => {
+  switch (sortOrder.value) {
+    case 'newest': return 'time_desc'
+    case 'oldest': return 'time_asc'
+    case 'costHigh': return 'cost_desc'
+    case 'costLow': return 'cost_asc'
+    default: return 'time_desc'
+  }
+}
 
 const fetchRecords = async () => {
   loading.value = true
   
   try {
-    // 模拟 API 请求
-    await new Promise(resolve => setTimeout(resolve, 1000))
+    const userJson = localStorage.getItem('currentUser')
+    if (!userJson) {
+      throw new Error('未找到用户信息')
+    }
     
-    // 模拟数据
-    records.value = [
-      {
-        id: 'BILL202306150001',
-        pileName: '快充桩 A',
-        chargeAmount: 15,
-        chargeDuration: '0小时30分钟',
-        createdAt: '2023-06-15 10:35:00',
-        startTime: '2023-06-15 10:00:00',
-        endTime: '2023-06-15 10:30:00',
-        chargeCost: 15,
-        serviceCost: 12,
-        totalCost: 27,
-        status: 'completed'
+    const user = JSON.parse(userJson)
+    const { startDate, endDate } = getDateRange()
+    
+    const response = await axios.get(`${API_BASE_URL}/api/charging/records`, {
+      headers: {
+        'X-Username': user.username
       },
-      {
-        id: 'BILL202306140002',
-        pileName: '快充桩 B',
-        chargeAmount: 20,
-        chargeDuration: '0小时40分钟',
-        createdAt: '2023-06-14 15:45:00',
-        startTime: '2023-06-14 15:00:00',
-        endTime: '2023-06-14 15:40:00',
-        chargeCost: 20,
-        serviceCost: 16,
-        totalCost: 36,
-        status: 'completed'
-      },
-      {
-        id: 'BILL202306120003',
-        pileName: '慢充桩 C',
-        chargeAmount: 10,
-        chargeDuration: '1小时25分钟',
-        createdAt: '2023-06-12 09:30:00',
-        startTime: '2023-06-12 08:00:00',
-        endTime: '2023-06-12 09:25:00',
-        chargeCost: 7,
-        serviceCost: 8,
-        totalCost: 15,
-        status: 'completed'
-      },
-      {
-        id: 'BILL202306100004',
-        pileName: '快充桩 A',
-        chargeAmount: 8,
-        chargeDuration: '0小时15分钟',
-        createdAt: '2023-06-10 18:20:00',
-        startTime: '2023-06-10 18:00:00',
-        endTime: '2023-06-10 18:15:00',
-        chargeCost: 8,
-        serviceCost: 6.4,
-        totalCost: 14.4,
-        status: 'interrupted'
-      },
-      {
-        id: 'BILL202306050005',
-        pileName: '慢充桩 D',
-        chargeAmount: 5,
-        chargeDuration: '0小时42分钟',
-        createdAt: '2023-06-05 21:45:00',
-        startTime: '2023-06-05 21:00:00',
-        endTime: '2023-06-05 21:42:00',
-        chargeCost: 2,
-        serviceCost: 4,
-        totalCost: 6,
-        status: 'cancelled'
+      params: {
+        startDate,
+        endDate,
+        pileId: selectedPile.value === 'all' ? '' : selectedPile.value,
+        sortBy: getSortBy(),
+        page: currentPage.value,
+        pageSize
       }
-    ]
-    
-    // 统计数据
-    calculateSummary()
-    
-    // 分页设置
-    totalPages.value = Math.ceil(records.value.length / pageSize)
-    
+    })
+
+    if (response.data.code === 200) {
+      const data = response.data.data
+      records.value = data.records
+      summary.value = {
+        totalCount: data.totalCount,
+        totalAmount: data.totalEnergy,
+        totalCost: data.totalCost
+      }
+      totalPages.value = Math.ceil(data.totalCount / pageSize)
+    } else {
+      throw new Error(response.data.message)
+    }
   } catch (error) {
     console.error('获取详单记录失败:', error)
+    alert('获取详单记录失败，请稍后重试')
   } finally {
     loading.value = false
-  }
-}
-
-const calculateSummary = () => {
-  let totalAmount = 0
-  let totalCost = 0
-  
-  records.value.forEach(record => {
-    totalAmount += record.chargeAmount
-    totalCost += record.totalCost
-  })
-  
-  summary.value = {
-    totalCount: records.value.length,
-    totalAmount: totalAmount,
-    totalCost: totalCost
   }
 }
 
 // 状态展示
 const getStatusText = (status: string) => {
   switch (status) {
-    case 'completed': return '已完成'
-    case 'interrupted': return '中断'
-    case 'cancelled': return '已取消'
+    case 'COMPLETED': return '已完成'
+    case 'INTERRUPTED': return '中断'
+    case 'CANCELLED': return '已取消'
     default: return '未知状态'
   }
 }
 
 const getStatusClass = (status: string) => {
   switch (status) {
-    case 'completed': return 'status-completed'
-    case 'interrupted': return 'status-interrupted'
-    case 'cancelled': return 'status-cancelled'
+    case 'COMPLETED': return 'status-completed'
+    case 'INTERRUPTED': return 'status-interrupted'
+    case 'CANCELLED': return 'status-cancelled'
     default: return ''
   }
 }
 
 // 格式化日期
 const formatDate = (dateString: string) => {
-  // 实际应用中可能需要更复杂的日期格式化
-  return dateString
+  const date = new Date(dateString)
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
 }
 
 // 事件处理
 const applyFilters = () => {
+  currentPage.value = 1
   fetchRecords()
 }
 
 const changePage = (pageNum: number) => {
   currentPage.value = pageNum
+  fetchRecords()
 }
 
 const viewDetail = (record: BillRecord) => {
   // 实际应用中可能会跳转到详情页或打开模态框
-  alert(`查看详单 ${record.id} 的详细信息`)
+  alert(`查看详单 ${record.recordId} 的详细信息`)
 }
 
 const goBack = () => {
   router.push('/user-dashboard')
 }
+
+onMounted(() => {
+  fetchRecords()
+})
 </script>
 
 <style scoped>

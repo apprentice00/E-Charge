@@ -252,7 +252,6 @@
         "serviceCost": "number",               // 服务费用（元）
         "totalCost": "number",                 // 总费用（元）
         "status": "string",           // 状态（COMPLETED, CANCELLED, ...）
-        "generateTime": "string" // 详单生成时间
       }
     ]
   },
