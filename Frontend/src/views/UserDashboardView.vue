@@ -141,45 +141,91 @@ const hasActiveCharging = ref(false)
 const activePile = ref('')
 const chargedAmount = ref(0)
 const progressPercent = ref(0)
+const startTime = ref('')
+const estimatedEndTime = ref('')
 
-// 获取用户仪表盘数据
-const fetchDashboardData = async () => {
+// 获取用户统计数据
+const fetchUserStats = async () => {
   try {
-    isLoading.value = true
     const userJson = localStorage.getItem('currentUser')
     if (!userJson) {
       throw new Error('未找到用户信息')
     }
     
     const user = JSON.parse(userJson)
-    const response = await axios.get(`${API_BASE_URL}/api/user/dashboard`, {
+    const response = await axios.get(`${API_BASE_URL}/api/user/statistics`, {
       headers: {
         'X-Username': user.username
       }
     })
-    const data = response.data
 
-    // 更新统计数据
-    chargeCount.value = data.stats.chargeCount
-    totalEnergy.value = data.stats.totalEnergy
-    totalCost.value = data.stats.totalCost.toFixed(2)
-
-    // 更新充电状态
-    if (data.activeCharging) {
-      hasActiveCharging.value = true
-      activePile.value = data.activeCharging.pileName
-      chargedAmount.value = data.activeCharging.chargedAmount
-      progressPercent.value = data.activeCharging.progressPercent
+    if (response.data.code === 200) {
+      const stats = response.data.data
+      chargeCount.value = stats.chargeCount
+      totalEnergy.value = stats.totalEnergy
+      totalCost.value = stats.totalCost.toFixed(2)
     } else {
-      hasActiveCharging.value = false
+      throw new Error(response.data.message)
     }
   } catch (error) {
-    console.error('获取仪表盘数据失败:', error)
-    // 如果获取数据失败，可以显示一些默认值
+    console.error('获取用户统计数据失败:', error)
+    // 如果获取数据失败，显示默认值
     chargeCount.value = 0
     totalEnergy.value = 0
     totalCost.value = '0.00'
+  }
+}
+
+// 获取当前充电状态
+const fetchChargingStatus = async () => {
+  try {
+    const userJson = localStorage.getItem('currentUser')
+    if (!userJson) {
+      throw new Error('未找到用户信息')
+    }
+    
+    const user = JSON.parse(userJson)
+    const response = await axios.get(`${API_BASE_URL}/api/charging/current`, {
+      headers: {
+        'X-Username': user.username
+      }
+    })
+
+    if (response.data.code === 200) {
+      const status = response.data.data
+      hasActiveCharging.value = status.hasActiveCharging
+      if (status.hasActiveCharging) {
+        activePile.value = status.activePile
+        chargedAmount.value = status.chargedAmount
+        progressPercent.value = status.progressPercent
+        startTime.value = status.startTime
+        estimatedEndTime.value = status.estimatedEndTime
+      }
+    } else {
+      throw new Error(response.data.message)
+    }
+  } catch (error) {
+    console.error('获取充电状态失败:', error)
+    // 如果获取数据失败，显示默认值
     hasActiveCharging.value = false
+    activePile.value = ''
+    chargedAmount.value = 0
+    progressPercent.value = 0
+    startTime.value = ''
+    estimatedEndTime.value = ''
+  }
+}
+
+// 获取所有数据
+const fetchDashboardData = async () => {
+  isLoading.value = true
+  try {
+    await Promise.all([
+      fetchUserStats(),
+      fetchChargingStatus()
+    ])
+  } catch (error) {
+    console.error('获取仪表盘数据失败:', error)
   } finally {
     isLoading.value = false
   }
@@ -208,10 +254,14 @@ const navigateTo = (path: string) => {
 const logout = async () => {
   try {
     // 调用登出API
-    await axios.post(`${API_BASE_URL}/api/logout`)
-    // 清除登录状态
-    localStorage.removeItem('currentUser')
-    router.push('/')
+    const response = await axios.post(`${API_BASE_URL}/api/logout`)
+    if (response.data.code === 200) {
+      // 清除登录状态
+      localStorage.removeItem('currentUser')
+      router.push('/')
+    } else {
+      throw new Error(response.data.message)
+    }
   } catch (error) {
     console.error('登出失败:', error)
     // 即使API调用失败，也清除本地状态并跳转

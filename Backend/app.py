@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
 CORS(app)  # 允许跨域请求，开发时需要
@@ -10,27 +11,37 @@ mock_users = [
     {"username": "admin", "password": "123", "type": "admin"}
 ]
 
-# 模拟的用户仪表盘数据
-mock_dashboard_data = {
+# 模拟的用户统计数据
+mock_user_stats = {
     "user": {
-        "stats": {
-            "chargeCount": 6,
-            "totalEnergy": 158,
-            "totalCost": 132.50
-        },
-        "activeCharging": {
-            "pileName": "快充桩 A",
-            "chargedAmount": 8.5,
-            "progressPercent": 42
-        }
+        "chargeCount": 7,
+        "totalEnergy": 158,
+        "totalCost": 132.50
     },
     "admin": {
-        "stats": {
-            "chargeCount": 0,
-            "totalEnergy": 0,
-            "totalCost": 0
-        },
-        "activeCharging": None
+        "chargeCount": 0,
+        "totalEnergy": 0,
+        "totalCost": 0
+    }
+}
+
+# 模拟的充电状态数据
+mock_charging_status = {
+    "user": {
+        "hasActiveCharging": True,
+        "activePile": "快充桩 A",
+        "chargedAmount": 8.5,
+        "progressPercent": 42,
+        "startTime": (datetime.now() - timedelta(minutes=30)).isoformat(),
+        "estimatedEndTime": (datetime.now() + timedelta(minutes=40)).isoformat()
+    },
+    "admin": {
+        "hasActiveCharging": False,
+        "activePile": "",
+        "chargedAmount": 0,
+        "progressPercent": 0,
+        "startTime": "",
+        "estimatedEndTime": ""
     }
 }
 
@@ -51,26 +62,59 @@ def login():
 
     return jsonify({"message": "用户名或密码错误"}), 401
 
-# 定义用户仪表盘数据API路由
-@app.route('/api/user/dashboard', methods=['GET'])
-def get_dashboard_data():
-    # 从请求头中获取用户名（实际应用中应该从session或token中获取）
+# 获取用户充电统计
+@app.route('/api/user/statistics', methods=['GET'])
+def get_user_statistics():
     username = request.headers.get('X-Username')
     if not username:
-        return jsonify({"message": "未提供用户信息"}), 401
+        return jsonify({
+            "code": 401,
+            "message": "未提供用户信息"
+        }), 401
 
-    # 获取对应用户的仪表盘数据
-    dashboard_data = mock_dashboard_data.get(username)
-    if not dashboard_data:
-        return jsonify({"message": "未找到用户数据"}), 404
+    stats = mock_user_stats.get(username)
+    if not stats:
+        return jsonify({
+            "code": 404,
+            "message": "未找到用户数据"
+        }), 404
 
-    return jsonify(dashboard_data)
+    return jsonify({
+        "code": 200,
+        "data": stats,
+        "message": "success"
+    })
+
+# 获取当前充电状态
+@app.route('/api/charging/current', methods=['GET'])
+def get_charging_status():
+    username = request.headers.get('X-Username')
+    if not username:
+        return jsonify({
+            "code": 401,
+            "message": "未提供用户信息"
+        }), 401
+
+    status = mock_charging_status.get(username)
+    if not status:
+        return jsonify({
+            "code": 404,
+            "message": "未找到用户数据"
+        }), 404
+
+    return jsonify({
+        "code": 200,
+        "data": status,
+        "message": "success"
+    })
 
 # 定义登出API路由
 @app.route('/api/logout', methods=['POST'])
 def logout():
-    # 实际应用中这里应该清除session或token
-    return jsonify({"message": "登出成功"})
+    return jsonify({
+        "code": 200,
+        "message": "success"
+    })
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True) 
