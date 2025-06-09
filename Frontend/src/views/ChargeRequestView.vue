@@ -94,6 +94,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import axios from 'axios'
+import { API_BASE_URL } from '../config'
 
 const router = useRouter()
 
@@ -104,27 +106,60 @@ const isSubmitting = ref(false)
 const requestError = ref('')
 const isEdit = ref(false)
 
-// 模拟状态 - 实际应用中应从API获取
+// 状态数据
 const requestStatus = ref<null | 'waiting' | 'charging' | null>(null)
 const queueNumber = ref<null | string>(null)
+const requestId = ref<null | string>(null)
 
 // 权限控制
 const canEditMode = computed(() => !requestStatus.value || requestStatus.value === 'waiting')
 const canEditAmount = computed(() => !requestStatus.value || requestStatus.value === 'waiting')
 
-// 模拟加载数据
-onMounted(() => {
-  // 模拟加载请求状态
-  // 实际应用中会从API获取
-  setTimeout(() => {
-    // 假设用户已有请求
-    isEdit.value = true
-    requestStatus.value = 'waiting'
-    queueNumber.value = 'F3'
-    chargeMode.value = 'fast'
-    chargeAmount.value = 15
-  }, 500)
-})
+// 获取当前充电状态
+const fetchChargingStatus = async () => {
+  try {
+    const userJson = localStorage.getItem('currentUser')
+    if (!userJson) {
+      throw new Error('未找到用户信息')
+    }
+    
+    const user = JSON.parse(userJson)
+    const response = await axios.get(`${API_BASE_URL}/api/charging/current`, {
+      headers: {
+        'X-Username': user.username
+      }
+    })
+
+    if (response.data.code === 200) {
+      const status = response.data.data
+      if (status.hasActiveCharging) {
+        requestStatus.value = 'charging'
+        isEdit.value = true
+      } else {
+        // 如果没有正在充电，检查是否有排队请求
+        const queueResponse = await axios.get(`${API_BASE_URL}/api/queue/status`, {
+          headers: {
+            'X-Username': user.username
+          }
+        })
+        
+        if (queueResponse.data.code === 200) {
+          const queueData = queueResponse.data.data
+          if (queueData.status === 'WAITING') {
+            requestStatus.value = 'waiting'
+            queueNumber.value = queueData.queueNumber
+            chargeMode.value = queueData.chargeType === '快充模式' ? 'fast' : 'slow'
+            chargeAmount.value = queueData.targetAmount
+            isEdit.value = true
+          }
+        }
+      }
+    }
+  } catch (error) {
+    console.error('获取充电状态失败:', error)
+    requestError.value = '获取充电状态失败，请稍后重试'
+  }
+}
 
 // 状态展示
 const requestStatusText = computed(() => {
@@ -189,15 +224,32 @@ const submitRequest = async () => {
     isSubmitting.value = true
     requestError.value = ''
     
-    // 模拟API调用
-    await new Promise(resolve => setTimeout(resolve, 1000))
+    const userJson = localStorage.getItem('currentUser')
+    if (!userJson) {
+      throw new Error('未找到用户信息')
+    }
     
-    // 模拟成功响应
-    isEdit.value = true
-    requestStatus.value = 'waiting'
-    queueNumber.value = chargeMode.value === 'fast' ? 'F3' : 'T5'
-    
-    alert(`请求已${isEdit.value ? '修改' : '提交'}成功！您的排队号码为 ${queueNumber.value}`)
+    const user = JSON.parse(userJson)
+    const response = await axios.post(`${API_BASE_URL}/api/charging/request`, {
+      username: user.username,
+      chargeType: chargeMode.value === 'fast' ? '快充模式' : '慢充模式',
+      targetAmount: chargeAmount.value
+    }, {
+      headers: {
+        'X-Username': user.username
+      }
+    })
+
+    if (response.data.code === 200) {
+      isEdit.value = true
+      requestStatus.value = 'waiting'
+      queueNumber.value = response.data.data.queueNumber
+      requestId.value = response.data.data.requestId
+      
+      alert(`请求已${isEdit.value ? '修改' : '提交'}成功！您的排队号码为 ${queueNumber.value}`)
+    } else {
+      throw new Error(response.data.message)
+    }
   } catch (error) {
     requestError.value = '提交请求失败，请稍后重试'
     console.error('提交请求错误:', error)
@@ -212,14 +264,31 @@ const cancelRequest = async () => {
   try {
     isSubmitting.value = true
     
-    // 模拟API调用
-    await new Promise(resolve => setTimeout(resolve, 1000))
+    const userJson = localStorage.getItem('currentUser')
+    if (!userJson) {
+      throw new Error('未找到用户信息')
+    }
     
-    requestStatus.value = null
-    queueNumber.value = null
-    isEdit.value = false
-    
-    alert('充电请求已取消')
+    const user = JSON.parse(userJson)
+    const response = await axios.post(`${API_BASE_URL}/api/queue/cancel`, {
+      username: user.username,
+      requestId: requestId.value
+    }, {
+      headers: {
+        'X-Username': user.username
+      }
+    })
+
+    if (response.data.code === 200) {
+      requestStatus.value = null
+      queueNumber.value = null
+      requestId.value = null
+      isEdit.value = false
+      
+      alert('充电请求已取消')
+    } else {
+      throw new Error(response.data.message)
+    }
   } catch (error) {
     requestError.value = '取消请求失败，请稍后重试'
     console.error('取消请求错误:', error)
@@ -231,6 +300,10 @@ const cancelRequest = async () => {
 const goBack = () => {
   router.push('/user-dashboard')
 }
+
+onMounted(() => {
+  fetchChargingStatus()
+})
 </script>
 
 <style scoped>

@@ -77,7 +77,7 @@
       </div>
 
       <div class="queue-info-card">
-        <h2>{{ chargeMode === 'fast' ? '快充' : '慢充' }}区状态</h2>
+        <h2>充电区状态</h2>
         
         <div class="queue-stats">
           <div class="stats-item">
@@ -108,6 +108,7 @@
               :class="{ 'charger-busy': !charger.available }"
             >
               <div class="charger-name">{{ charger.name }}</div>
+              <div class="charger-type">{{ charger.type === 'fast' ? '快充' : '慢充' }}</div>
               <div class="charger-availability">
                 {{ charger.available ? '可用' : '使用中' }}
               </div>
@@ -122,6 +123,33 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import axios from 'axios'
+import { API_BASE_URL } from '../config'
+
+// 定义类型
+interface ChargingPile {
+  pileId: string
+  name: string
+  status: 'AVAILABLE' | 'IN_USE' | 'FAULT'
+  type: 'fast' | 'slow'
+}
+
+interface Charger {
+  id: string
+  name: string
+  available: boolean
+  type: 'fast' | 'slow'
+}
+
+interface QueueStatus {
+  chargeType: string
+  queueNumber: string
+  targetAmount: number
+  status: 'WAITING' | 'CHARGING' | 'FINISHED' | 'CANCELLED'
+  position: number
+  estimatedWaitTime: number
+  requestId: string
+}
 
 const router = useRouter()
 const loading = ref(true)
@@ -129,25 +157,20 @@ const isSubmitting = ref(false)
 
 // 充电请求数据
 const hasRequest = ref(false)
-const chargeMode = ref('fast')
+const chargeMode = ref<'fast' | 'slow'>('fast')
 const queueNumber = ref('')
 const chargeAmount = ref(0)
 const status = ref<'waiting' | 'charging' | null>(null)
 const queuePosition = ref(0)
 const estimatedWaitTime = ref('')
+const requestId = ref('')
 
 // 排队区统计
 const waitingCount = ref(0)
 const chargingCount = ref(0)
 
-// 充电桩数据 - 模拟数据
-const chargers = ref([
-  { id: 'A', name: '快充桩 A', available: false, type: 'fast' },
-  { id: 'B', name: '快充桩 B', available: true, type: 'fast' },
-  { id: 'C', name: '慢充桩 C', available: false, type: 'slow' },
-  { id: 'D', name: '慢充桩 D', available: true, type: 'slow' },
-  { id: 'E', name: '慢充桩 E', available: false, type: 'slow' },
-])
+// 充电桩数据
+const chargers = ref<Charger[]>([])
 
 // 计算属性
 const statusText = computed(() => {
@@ -172,38 +195,71 @@ const canEdit = computed(() => {
   return status.value === 'waiting'
 })
 
-// 模拟数据加载
-onMounted(() => {
-  fetchData()
-})
-
-const fetchData = async () => {
-  loading.value = true
-  
+// 获取排队状态
+const fetchQueueStatus = async () => {
   try {
-    // 模拟 API 请求
-    await new Promise(resolve => setTimeout(resolve, 1000))
+    const userJson = localStorage.getItem('currentUser')
+    if (!userJson) {
+      throw new Error('未找到用户信息')
+    }
     
-    // 模拟数据
-    hasRequest.value = true
-    chargeMode.value = 'fast'
-    queueNumber.value = 'F3'
-    chargeAmount.value = 15
-    status.value = 'waiting'
-    queuePosition.value = 3
-    estimatedWaitTime.value = '约 20 分钟'
-    
-    waitingCount.value = 5
-    chargingCount.value = 2
-    
-    // 过滤出对应充电模式的充电桩
-    const filteredChargers = chargers.value.filter(
-      charger => charger.type === chargeMode.value
-    )
-    chargers.value = filteredChargers
-    
+    const user = JSON.parse(userJson)
+    const response = await axios.get(`${API_BASE_URL}/api/queue/status`, {
+      headers: {
+        'X-Username': user.username
+      }
+    })
+
+    if (response.data.code === 200) {
+      const data = response.data.data
+      hasRequest.value = true
+      chargeMode.value = data.chargeType === '快充模式' ? 'fast' : 'slow'
+      queueNumber.value = data.queueNumber
+      chargeAmount.value = data.targetAmount
+      status.value = data.status === 'WAITING' ? 'waiting' : 'charging'
+      queuePosition.value = data.position
+      estimatedWaitTime.value = `约 ${data.estimatedWaitTime} 分钟`
+      requestId.value = data.requestId
+    } else {
+      hasRequest.value = false
+    }
   } catch (error) {
     console.error('获取排队状态失败:', error)
+    hasRequest.value = false
+  }
+}
+
+// 获取充电区状态
+const fetchChargeAreaStatus = async () => {
+  try {
+    const response = await axios.get(`${API_BASE_URL}/api/queue/charge-area`)
+    
+    if (response.data.code === 200) {
+      const data = response.data.data
+      waitingCount.value = data.queueCarCount
+      chargingCount.value = data.chargingCarCount
+      chargers.value = data.piles.map((pile: ChargingPile) => ({
+        id: pile.pileId,
+        name: pile.name,
+        available: pile.status === 'AVAILABLE',
+        type: pile.type
+      }))
+    }
+  } catch (error) {
+    console.error('获取充电区状态失败:', error)
+  }
+}
+
+// 加载数据
+const fetchData = async () => {
+  loading.value = true
+  try {
+    await Promise.all([
+      fetchQueueStatus(),
+      fetchChargeAreaStatus()
+    ])
+  } catch (error) {
+    console.error('获取数据失败:', error)
   } finally {
     loading.value = false
   }
@@ -219,12 +275,29 @@ const cancelRequest = async () => {
   try {
     isSubmitting.value = true
     
-    // 模拟API调用
-    await new Promise(resolve => setTimeout(resolve, 1000))
+    const userJson = localStorage.getItem('currentUser')
+    if (!userJson) {
+      throw new Error('未找到用户信息')
+    }
     
-    hasRequest.value = false
-    alert('充电请求已取消')
-    
+    const user = JSON.parse(userJson)
+    const response = await axios.post(`${API_BASE_URL}/api/queue/cancel`, {
+      username: user.username,
+      requestId: requestId.value
+    }, {
+      headers: {
+        'X-Username': user.username
+      }
+    })
+
+    if (response.data.code === 200) {
+      hasRequest.value = false
+      alert('充电请求已取消')
+      // 刷新数据
+      await fetchData()
+    } else {
+      throw new Error(response.data.message)
+    }
   } catch (error) {
     console.error('取消请求错误:', error)
     alert('取消请求失败，请稍后重试')
@@ -244,6 +317,10 @@ const navigateToRequest = () => {
 const goBack = () => {
   router.push('/user-dashboard')
 }
+
+onMounted(() => {
+  fetchData()
+})
 </script>
 
 <style scoped>
@@ -564,6 +641,9 @@ const goBack = () => {
   border-radius: 6px;
   padding: 12px;
   text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
 .charger-busy {
@@ -574,6 +654,12 @@ const goBack = () => {
   font-weight: 500;
   margin-bottom: 5px;
   font-size: 14px;
+}
+
+.charger-type {
+  font-size: 12px;
+  color: var(--light-text);
+  margin: 2px 0;
 }
 
 .charger-availability {

@@ -1,5 +1,34 @@
 # 用户控制台后端API文档
 
+## 1. 用户认证
+
+### 用户登录
+- **接口**: `POST /api/login`
+- **描述**: 用户登录接口
+- **请求参数**:
+```json
+{
+  "username": "string",
+  "password": "string"
+}
+```
+- **响应数据**:
+```json
+{
+  "type": "string"  // 用户类型：user 或 admin
+}
+```
+
+### 用户登出
+- **接口**: `POST /api/logout`
+- **描述**: 用户登出接口
+- **响应数据**:
+```json
+{
+  "code": 200,
+  "message": "success"
+}
+```
 
 ## 2. 统计数据
 
@@ -7,7 +36,7 @@
 - **接口**: `GET /api/user/statistics`
 - **描述**: 获取用户的充电统计数据
 - **请求参数**: 
-  * username: 用户名
+  * username: 用户名（通过 X-Username 请求头传递）
 - **响应数据**:
 ```json
 {
@@ -27,7 +56,7 @@
 - **接口**: `GET /api/charging/current`
 - **描述**: 获取用户当前正在进行的充电状态
 - **请求参数**: 
-  * username: 用户名
+  * username: 用户名（通过 X-Username 请求头传递）
 - **响应数据**:
 ```json
 {
@@ -52,18 +81,19 @@
 - **请求参数**:
 ```json
 {
-  "username": "string",     // 用户名
-  "chargeType": "string",   // 充电类型
+  "chargeType": "string",   // 充电类型（快充模式/慢充模式）
   "targetAmount": "number"  // 目标充电量（度）
 }
 ```
+- **请求头**:
+  * X-Username: 用户名
 - **响应数据**:
 ```json
 {
   "code": 200,
   "data": {
     "requestId": "string",
-    "queueNumber": "number", // 排队号码
+    "queueNumber": "string", // 排队号码，如"F3"
     "estimatedStartTime": "string" // 预计开始时间
   },
   "message": "success"
@@ -76,7 +106,7 @@
 - **接口**: `GET /api/queue/status`
 - **描述**: 获取用户当前的排队信息
 - **请求参数**: 
-  * username: 用户名
+  * username: 用户名（通过 X-Username 请求头传递）
 - **响应数据**:
 ```json
 {
@@ -87,15 +117,16 @@
     "targetAmount": "number",       // 请求充电量（度）
     "status": "WAITING",            // 当前状态（如：WAITING, CHARGING, FINISHED, CANCELLED）
     "position": "number",           // 当前排队位置
-    "estimatedWaitTime": "number"   // 预计等待时间（分钟）
+    "estimatedWaitTime": "number",  // 预计等待时间（分钟）
+    "requestId": "string"           // 请求ID
   },
   "message": "success"
 }
 ```
 
-### 获取快充区整体状态
-- **接口**: `GET /api/queue/fast-charge-area`
-- **描述**: 获取快充区的整体排队和充电桩状态
+### 获取充电区整体状态
+- **接口**: `GET /api/queue/charge-area`
+- **描述**: 获取充电区的整体排队和充电桩状态
 - **请求参数**: 无
 - **响应数据**:
 ```json
@@ -108,7 +139,8 @@
       {
         "pileId": "string",       // 充电桩编号
         "name": "string",         // 充电桩名称
-        "status": "string"        // 状态：IN_USE（使用中）, AVAILABLE（可用）, FAULT（故障）
+        "status": "string",       // 状态：AVAILABLE（可用）, IN_USE（使用中）, FAULT（故障）
+        "type": "string"          // 类型：fast（快充）, slow（慢充）
       }
     ]
   },
@@ -122,10 +154,11 @@
 - **请求参数**:
 ```json
 {
-  "username": "string",
-  "requestId": "string"
+  "requestId": "string"  // 请求ID
 }
 ```
+- **请求头**:
+  * X-Username: 用户名
 - **响应数据**:
 ```json
 {
@@ -241,3 +274,4 @@
 1. 时间格式统一使用ISO 8601标准
 2. 金额相关数据统一使用元为单位，保留两位小数
 3. 电量相关数据统一使用度为单位，保留一位小数
+4. 用户认证信息通过 X-Username 请求头传递
