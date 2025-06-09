@@ -248,9 +248,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
+import axios from 'axios'
 
+// API基础URL
+const API_BASE_URL = 'http://localhost:5000/api'
+
+// 接口类型定义
 interface ChargingPile {
   id: number;
   name: string;
@@ -284,216 +289,127 @@ interface ReportData {
   totalFee: string;
 }
 
+interface Statistics {
+  activePiles: number;
+  totalPiles: number;
+  totalQueuedCars: number;
+  totalRevenue: number;
+}
+
 const router = useRouter()
 const username = ref('管理员')
 
-// 充电桩统计数据
-const chargingPiles = ref<ChargingPile[]>([
-  {
-    id: 1,
-    name: '快充桩 A',
-    isActive: true,
-    totalCharges: 128,
-    totalHours: 215,
-    totalEnergy: 864,
-    queueCount: 3
-  },
-  {
-    id: 2,
-    name: '快充桩 B',
-    isActive: true,
-    totalCharges: 96,
-    totalHours: 190,
-    totalEnergy: 760,
-    queueCount: 2
-  },
-  {
-    id: 3,
-    name: '慢充桩 A',
-    isActive: false,
-    totalCharges: 72,
-    totalHours: 245,
-    totalEnergy: 416,
-    queueCount: 0
-  },
-  {
-    id: 4,
-    name: '慢充桩 B',
-    isActive: true,
-    totalCharges: 68,
-    totalHours: 230,
-    totalEnergy: 392,
-    queueCount: 1
-  },
-  {
-    id: 5,
-    name: '慢充桩 C',
-    isActive: true,
-    totalCharges: 83,
-    totalHours: 210,
-    totalEnergy: 352,
-    queueCount: 0
-  }
-])
+// 状态数据
+const chargingPiles = ref<ChargingPile[]>([])
+const waitingCars = ref<WaitingCar[]>([])
+const statistics = ref<Statistics>({
+  activePiles: 0,
+  totalPiles: 0,
+  totalQueuedCars: 0,
+  totalRevenue: 0
+})
 
-// 等待车辆信息
-const waitingCars = ref<WaitingCar[]>([
-  {
-    id: 1,
-    pileName: '快充桩 A',
-    userId: 'user01',
-    batteryCapacity: 60,
-    requestedCharge: 40,
-    queueTime: '15分钟',
-    status: '排队中',
-    statusClass: 'waiting'
-  },
-  {
-    id: 2,
-    pileName: '快充桩 A',
-    userId: 'user02',
-    batteryCapacity: 80,
-    requestedCharge: 60,
-    queueTime: '8分钟',
-    status: '排队中',
-    statusClass: 'waiting'
-  },
-  {
-    id: 3,
-    pileName: '快充桩 A',
-    userId: 'user05',
-    batteryCapacity: 70,
-    requestedCharge: 30,
-    queueTime: '2分钟',
-    status: '排队中',
-    statusClass: 'waiting'
-  },
-  {
-    id: 4,
-    pileName: '快充桩 B',
-    userId: 'user03',
-    batteryCapacity: 90,
-    requestedCharge: 45,
-    queueTime: '10分钟',
-    status: '排队中',
-    statusClass: 'waiting'
-  },
-  {
-    id: 5,
-    pileName: '快充桩 B',
-    userId: 'user07',
-    batteryCapacity: 60,
-    requestedCharge: 50,
-    queueTime: '3分钟',
-    status: '排队中',
-    statusClass: 'waiting'
-  },
-  {
-    id: 6,
-    pileName: '慢充桩 B',
-    userId: 'user04',
-    batteryCapacity: 80,
-    requestedCharge: 70,
-    queueTime: '5分钟',
-    status: '排队中',
-    statusClass: 'waiting'
-  }
-])
-
-// 报表数据
+// 报表相关数据
 const reportTimeRange = ref('day')
 const reportPileId = ref('all')
 const showReport = ref(false)
 const reportData = ref<ReportData[]>([])
 const chartType = ref('charges')
 
-// 计算属性
-const activePiles = computed(() => {
-  return chargingPiles.value.filter(pile => pile.isActive).length
-})
+// 定时器
+let updateTimer: number | null = null
 
-const totalPiles = computed(() => {
-  return chargingPiles.value.length
-})
-
-const totalQueuedCars = computed(() => {
-  return waitingCars.value.length
-})
-
-const totalRevenue = computed(() => {
-  // 模拟计算总收入
-  return (Math.random() * 2000 + 1000).toFixed(2)
-})
-
-// 方法
-const togglePileStatus = (pileId: number) => {
-  const pile = chargingPiles.value.find(p => p.id === pileId)
-  if (pile) {
-    pile.isActive = !pile.isActive
+// API请求函数
+const fetchStatistics = async () => {
+  try {
+    const response = await axios.get(`${API_BASE_URL}/admin/statistics/piles`)
+    if (response.data.code === 200) {
+      statistics.value = response.data.data
+    }
+  } catch (error) {
+    console.error('获取统计数据失败:', error)
   }
 }
 
+const fetchChargingPiles = async () => {
+  try {
+    const response = await axios.get(`${API_BASE_URL}/admin/piles`)
+    if (response.data.code === 200) {
+      chargingPiles.value = response.data.data.piles
+    }
+  } catch (error) {
+    console.error('获取充电桩列表失败:', error)
+  }
+}
+
+const fetchWaitingCars = async () => {
+  try {
+    const response = await axios.get(`${API_BASE_URL}/admin/queue`)
+    if (response.data.code === 200) {
+      waitingCars.value = response.data.data.cars
+    }
+  } catch (error) {
+    console.error('获取等待队列失败:', error)
+  }
+}
+
+const fetchReportData = async () => {
+  try {
+    const response = await axios.get(`${API_BASE_URL}/admin/reports`, {
+      params: {
+        timeRange: reportTimeRange.value,
+        pileId: reportPileId.value
+      }
+    })
+    if (response.data.code === 200) {
+      reportData.value = response.data.data.reports
+      showReport.value = true
+    }
+  } catch (error) {
+    console.error('获取报表数据失败:', error)
+  }
+}
+
+// 更新充电桩状态
+const togglePileStatus = async (pileId: number) => {
+  try {
+    const pile = chargingPiles.value.find(p => p.id === pileId)
+    if (!pile) return
+
+    const response = await axios.post(`${API_BASE_URL}/admin/piles/${pileId}/status`, {
+      isActive: !pile.isActive
+    })
+
+    if (response.data.code === 200) {
+      // 更新本地状态
+      pile.isActive = !pile.isActive
+      // 重新获取统计数据
+      await fetchStatistics()
+    }
+  } catch (error) {
+    console.error('更新充电桩状态失败:', error)
+  }
+}
+
+// 查看充电桩详情
 const viewPileDetails = (pileId: number) => {
   router.push(`/pile-details/${pileId}`)
 }
 
+// 生成报表
 const generateReport = () => {
-  // 模拟生成报表数据
-  showReport.value = true
-  
-  // 根据选择的充电桩和时间范围生成报表
-  let data: ReportData[] = []
-  
-  if (reportPileId.value === 'all') {
-    // 生成所有充电桩的报表
-    data = chargingPiles.value.map(pile => {
-      return {
-        id: pile.id,
-        timeRange: getTimeRangeLabel(),
-        pileName: pile.name,
-        totalCharges: pile.totalCharges,
-        totalHours: pile.totalHours,
-        totalEnergy: pile.totalEnergy,
-        chargeFee: (pile.totalEnergy * 0.8).toFixed(2),
-        serviceFee: (pile.totalEnergy * 0.2).toFixed(2),
-        totalFee: (pile.totalEnergy * 1.0).toFixed(2)
-      }
-    })
-  } else {
-    // 生成指定充电桩的报表
-    const pile = chargingPiles.value.find(p => p.id === parseInt(reportPileId.value))
-    if (pile) {
-      data = [{
-        id: pile.id,
-        timeRange: getTimeRangeLabel(),
-        pileName: pile.name,
-        totalCharges: pile.totalCharges,
-        totalHours: pile.totalHours,
-        totalEnergy: pile.totalEnergy,
-        chargeFee: (pile.totalEnergy * 0.8).toFixed(2),
-        serviceFee: (pile.totalEnergy * 0.2).toFixed(2),
-        totalFee: (pile.totalEnergy * 1.0).toFixed(2)
-      }]
-    }
-  }
-  
-  reportData.value = data
+  fetchReportData()
 }
 
-const getTimeRangeLabel = () => {
-  const now = new Date()
-  if (reportTimeRange.value === 'day') {
-    return `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`
-  } else if (reportTimeRange.value === 'week') {
-    return `${now.getFullYear()}年第${Math.ceil(now.getDate() / 7)}周`
-  } else {
-    return `${now.getFullYear()}-${now.getMonth() + 1}`
-  }
-}
+// 计算属性
+const activePiles = computed(() => statistics.value.activePiles)
+const totalPiles = computed(() => statistics.value.totalPiles)
+const totalQueuedCars = computed(() => statistics.value.totalQueuedCars)
+const totalRevenue = computed(() => statistics.value.totalRevenue)
 
+// 图表相关方法
 const getBarHeight = (report: ReportData) => {
   if (chartType.value === 'charges') {
-    // 以最大值为基准计算百分比高度
     const maxCharges = Math.max(...reportData.value.map(r => r.totalCharges))
     return `${(report.totalCharges / maxCharges * 100)}%`
   } else if (chartType.value === 'energy') {
@@ -505,23 +421,35 @@ const getBarHeight = (report: ReportData) => {
   }
 }
 
-const getChartValue = (report: ReportData) => {
-  if (chartType.value === 'charges') {
-    return report.totalCharges
-  } else if (chartType.value === 'energy') {
-    return `${report.totalEnergy}度`
-  } else {
-    return `¥${report.totalFee}`
+// 登出
+const logout = async () => {
+  try {
+    await axios.post(`${API_BASE_URL}/logout`)
+    localStorage.removeItem('currentUser')
+    router.push('/')
+  } catch (error) {
+    console.error('登出失败:', error)
   }
 }
 
-const logout = () => {
-  // 清除登录状态
-  localStorage.removeItem('currentUser')
-  router.push('/')
+// 初始化数据
+const initializeData = async () => {
+  await Promise.all([
+    fetchStatistics(),
+    fetchChargingPiles(),
+    fetchWaitingCars()
+  ])
 }
 
-onMounted(() => {
+// 定时更新数据
+const startDataUpdate = () => {
+  updateTimer = window.setInterval(() => {
+    initializeData()
+  }, 30000) // 每30秒更新一次
+}
+
+// 组件挂载时
+onMounted(async () => {
   // 从本地存储获取用户信息
   const userJson = localStorage.getItem('currentUser')
   if (userJson) {
@@ -531,6 +459,18 @@ onMounted(() => {
     } catch (e) {
       console.error('解析用户信息失败', e)
     }
+  }
+
+  // 初始化数据
+  await initializeData()
+  // 启动定时更新
+  startDataUpdate()
+})
+
+// 组件卸载时
+onUnmounted(() => {
+  if (updateTimer) {
+    clearInterval(updateTimer)
   }
 })
 </script>

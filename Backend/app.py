@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from datetime import datetime, timedelta
 import random
+import math
 
 app = Flask(__name__)
 CORS(app)  # 允许跨域请求，开发时需要
@@ -172,6 +173,127 @@ mock_charging_records = {
         }
     ]
 }
+
+# 模拟的管理员统计数据
+mock_admin_stats = {
+    "activePiles": 3,
+    "totalPiles": 5,
+    "totalQueuedCars": 6,
+    "totalRevenue": 1580.50
+}
+
+# 模拟的管理员充电桩数据
+mock_admin_piles = [
+    {
+        "id": 1,
+        "name": "快充桩 A",
+        "isActive": True,
+        "totalCharges": 12,
+        "totalHours": 215,
+        "totalEnergy": 864,
+        "queueCount": 3
+    },
+    {
+        "id": 2,
+        "name": "快充桩 B",
+        "isActive": True,
+        "totalCharges": 96,
+        "totalHours": 190,
+        "totalEnergy": 760,
+        "queueCount": 2
+    },
+    {
+        "id": 3,
+        "name": "慢充桩 A",
+        "isActive": False,
+        "totalCharges": 72,
+        "totalHours": 245,
+        "totalEnergy": 416,
+        "queueCount": 0
+    },
+    {
+        "id": 4,
+        "name": "慢充桩 B",
+        "isActive": True,
+        "totalCharges": 68,
+        "totalHours": 230,
+        "totalEnergy": 392,
+        "queueCount": 1
+    },
+    {
+        "id": 5,
+        "name": "慢充桩 C",
+        "isActive": True,
+        "totalCharges": 83,
+        "totalHours": 210,
+        "totalEnergy": 352,
+        "queueCount": 0
+    }
+]
+
+# 模拟的管理员等待队列数据
+mock_admin_queue = [
+    {
+        "id": 1,
+        "pileName": "快充桩 A",
+        "userId": "user01",
+        "batteryCapacity": 60,
+        "requestedCharge": 40,
+        "queueTime": "15分钟",
+        "status": "排队中",
+        "statusClass": "waiting"
+    },
+    {
+        "id": 2,
+        "pileName": "快充桩 A",
+        "userId": "user02",
+        "batteryCapacity": 80,
+        "requestedCharge": 60,
+        "queueTime": "8分钟",
+        "status": "排队中",
+        "statusClass": "waiting"
+    },
+    {
+        "id": 3,
+        "pileName": "快充桩 A",
+        "userId": "user05",
+        "batteryCapacity": 70,
+        "requestedCharge": 30,
+        "queueTime": "2分钟",
+        "status": "排队中",
+        "statusClass": "waiting"
+    },
+    {
+        "id": 4,
+        "pileName": "快充桩 B",
+        "userId": "user03",
+        "batteryCapacity": 90,
+        "requestedCharge": 45,
+        "queueTime": "10分钟",
+        "status": "排队中",
+        "statusClass": "waiting"
+    },
+    {
+        "id": 5,
+        "pileName": "快充桩 B",
+        "userId": "user07",
+        "batteryCapacity": 60,
+        "requestedCharge": 50,
+        "queueTime": "3分钟",
+        "status": "排队中",
+        "statusClass": "waiting"
+    },
+    {
+        "id": 6,
+        "pileName": "慢充桩 B",
+        "userId": "user04",
+        "batteryCapacity": 80,
+        "requestedCharge": 70,
+        "queueTime": "5分钟",
+        "status": "排队中",
+        "statusClass": "waiting"
+    }
+]
 
 # 定义登录API路由
 # 路由地址为 http://localhost:5000/api/login
@@ -463,6 +585,103 @@ def logout():
         "code": 200,
         "message": "success"
     })
+
+# 管理员API路由
+@app.route('/api/admin/statistics/piles', methods=['GET'])
+def get_admin_statistics():
+    return jsonify({
+        "code": 200,
+        "data": mock_admin_stats,
+        "message": "success"
+    })
+
+@app.route('/api/admin/piles', methods=['GET'])
+def get_admin_piles():
+    return jsonify({
+        "code": 200,
+        "data": {
+            "piles": mock_admin_piles
+        },
+        "message": "success"
+    })
+
+@app.route('/api/admin/piles/<int:pile_id>/status', methods=['POST'])
+def update_pile_status(pile_id):
+    data = request.get_json()
+    is_active = data.get('isActive')
+    
+    # 查找并更新充电桩状态
+    pile = next((p for p in mock_admin_piles if p['id'] == pile_id), None)
+    if not pile:
+        return jsonify({
+            "code": 404,
+            "message": "充电桩不存在"
+        }), 404
+    
+    pile['isActive'] = is_active
+    
+    # 更新统计数据
+    mock_admin_stats['activePiles'] = sum(1 for p in mock_admin_piles if p['isActive'])
+    
+    return jsonify({
+        "code": 200,
+        "data": {
+            "pileId": pile_id,
+            "isActive": is_active,
+            "updateTime": datetime.now().isoformat()
+        },
+        "message": "success"
+    })
+
+@app.route('/api/admin/queue', methods=['GET'])
+def get_admin_queue():
+    return jsonify({
+        "code": 200,
+        "data": {
+            "cars": mock_admin_queue
+        },
+        "message": "success"
+    })
+
+@app.route('/api/admin/reports', methods=['GET'])
+def get_admin_reports():
+    time_range = request.args.get('timeRange', 'day')
+    pile_id = request.args.get('pileId', 'all')
+    
+    # 根据时间范围和充电桩ID生成报表数据
+    reports = []
+    piles_to_report = mock_admin_piles if pile_id == 'all' else [p for p in mock_admin_piles if p['id'] == int(pile_id)]
+    
+    for pile in piles_to_report:
+        report = {
+            "id": pile['id'],
+            "timeRange": get_time_range_label(time_range),
+            "pileName": pile['name'],
+            "totalCharges": pile['totalCharges'],
+            "totalHours": pile['totalHours'],
+            "totalEnergy": pile['totalEnergy'],
+            "chargeFee": f"{(pile['totalEnergy'] * 0.8):.2f}",
+            "serviceFee": f"{(pile['totalEnergy'] * 0.2):.2f}",
+            "totalFee": f"{(pile['totalEnergy'] * 1.0):.2f}"
+        }
+        reports.append(report)
+    
+    return jsonify({
+        "code": 200,
+        "data": {
+            "reports": reports
+        },
+        "message": "success"
+    })
+
+def get_time_range_label(time_range):
+    now = datetime.now()
+    if time_range == 'day':
+        return f"{now.year}-{now.month}-{now.day}"
+    elif time_range == 'week':
+        return f"{now.year}年第{math.ceil(now.day / 7)}周"
+    else:
+        return f"{now.year}-{now.month}"
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True) 

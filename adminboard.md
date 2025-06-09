@@ -1,23 +1,5 @@
 # 管理员控制台后端API文档
 
-## 1. 管理员信息获取
-
-### 获取管理员基本信息
-- **接口**: `GET /api/admin/info`
-- **描述**: 获取当前登录管理员的基本信息
-- **请求参数**: 无
-- **响应数据**:
-```json
-{
-  "code": 200,
-  "data": {
-    "username": "string",
-    "adminId": "string",
-    "role": "string"
-  },
-  "message": "success"
-}
-```
 
 ## 2. 核心统计数据
 
@@ -103,7 +85,7 @@
       {
         "id": "number",
         "pileName": "string",
-        "userId": "string",
+        "username": "string",
         "batteryCapacity": "number",
         "requestedCharge": "number",
         "queueTime": "string",
@@ -164,14 +146,14 @@
     "totalEnergy": "number",
     "queueCount": "number",
     "currentCharging": {
-      "userId": "string",
+      "username": "string",
       "startTime": "string",
       "chargedAmount": "number",
       "progressPercent": "number"
     },
     "queueList": [
       {
-        "userId": "string",
+        "username": "string",
         "requestedCharge": "number",
         "queueTime": "string"
       }
