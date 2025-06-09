@@ -48,6 +48,8 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import axios from 'axios'
+import { API_BASE_URL } from '../config'
 
 const router = useRouter()
 const username = ref('')
@@ -67,18 +69,14 @@ const handleLogin = async () => {
     errorMessage.value = ''
 
     // 发送登录请求到后端
-    const response = await fetch('/api/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        username: username.value,
-        password: password.value
-      })
+    const response = await axios.post(`${API_BASE_URL}/api/login`, {
+      username: username.value,
+      password: password.value
     })
 
-    const data = await response.json()
+    const data = response.data
 
-    if (response.ok && data.type) {
+    if (response.status === 200 && data.type) {
       // 登录成功，保存用户信息到 localStorage
       localStorage.setItem('currentUser', JSON.stringify({
         username: username.value,

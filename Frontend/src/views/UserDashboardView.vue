@@ -14,125 +14,178 @@
       </div>
     </div>
     
-    <div class="dashboard-stats">
-      <div class="stat-card">
-        <div class="stat-icon charging-icon"></div>
-        <div class="stat-content">
-          <div class="stat-value">{{ chargeCount }}</div>
-          <div class="stat-label">本月充电次数</div>
-        </div>
-      </div>
-      
-      <div class="stat-card">
-        <div class="stat-icon energy-icon"></div>
-        <div class="stat-content">
-          <div class="stat-value">{{ totalEnergy }} <span class="unit">度</span></div>
-          <div class="stat-label">累计充电量</div>
-        </div>
-      </div>
-      
-      <div class="stat-card">
-        <div class="stat-icon cost-icon"></div>
-        <div class="stat-content">
-          <div class="stat-value">¥{{ totalCost }}</div>
-          <div class="stat-label">累计费用</div>
-        </div>
-      </div>
+    <div v-if="isLoading" class="loading-container">
+      <div class="loading-spinner"></div>
+      <div class="loading-text">加载中...</div>
     </div>
-
-    <div class="status-section" v-if="hasActiveCharging">
-      <div class="section-title">
-        <h2>当前充电</h2>
-      </div>
-      <div class="active-charging-card" @click="navigateTo('/charging-status')">
-        <div class="charging-info">
-          <div class="charging-pile">{{ activePile }}</div>
-          <div class="charging-progress">
-            <div class="progress-text">
-              <span>已充 {{ chargedAmount }}度</span>
-              <span>{{ progressPercent }}%</span>
-            </div>
-            <div class="progress-bar">
-              <div class="progress-fill" :style="{ width: progressPercent + '%' }"></div>
-            </div>
+    
+    <template v-else>
+      <div class="dashboard-stats">
+        <div class="stat-card">
+          <div class="stat-icon charging-icon"></div>
+          <div class="stat-content">
+            <div class="stat-value">{{ chargeCount }}</div>
+            <div class="stat-label">本月充电次数</div>
           </div>
         </div>
-        <div class="charging-action">查看详情</div>
+        
+        <div class="stat-card">
+          <div class="stat-icon energy-icon"></div>
+          <div class="stat-content">
+            <div class="stat-value">{{ totalEnergy }} <span class="unit">度</span></div>
+            <div class="stat-label">累计充电量</div>
+          </div>
+        </div>
+        
+        <div class="stat-card">
+          <div class="stat-icon cost-icon"></div>
+          <div class="stat-content">
+            <div class="stat-value">¥{{ totalCost }}</div>
+            <div class="stat-label">累计费用</div>
+          </div>
+        </div>
       </div>
-    </div>
 
-    <div class="section-title">
-      <h2>功能区</h2>
-      <div class="subtitle">选择以下功能进行操作</div>
-    </div>
+      <div class="status-section" v-if="hasActiveCharging">
+        <div class="section-title">
+          <h2>当前充电</h2>
+        </div>
+        <div class="active-charging-card" @click="navigateTo('/charging-status')">
+          <div class="charging-info">
+            <div class="charging-pile">{{ activePile }}</div>
+            <div class="charging-progress">
+              <div class="progress-text">
+                <span>已充 {{ chargedAmount }}度</span>
+                <span>{{ progressPercent }}%</span>
+              </div>
+              <div class="progress-bar">
+                <div class="progress-fill" :style="{ width: progressPercent + '%' }"></div>
+              </div>
+            </div>
+          </div>
+          <div class="charging-action">查看详情</div>
+        </div>
+      </div>
 
-    <div class="function-cards">
-      <div class="card" @click="navigateTo('/charge-request')">
-        <div class="card-icon">
-          <i class="icon-charge"></i>
-        </div>
-        <div class="card-content">
-          <h3>充电请求</h3>
-          <p>提交或修改充电请求</p>
-        </div>
-        <div class="card-arrow">→</div>
+      <div class="section-title">
+        <h2>功能区</h2>
+        <div class="subtitle">选择以下功能进行操作</div>
       </div>
-      
-      <div class="card" @click="navigateTo('/queue-status')">
-        <div class="card-icon">
-          <i class="icon-queue"></i>
+
+      <div class="function-cards">
+        <div class="card" @click="navigateTo('/charge-request')">
+          <div class="card-icon">
+            <i class="icon-charge"></i>
+          </div>
+          <div class="card-content">
+            <h3>充电请求</h3>
+            <p>提交或修改充电请求</p>
+          </div>
+          <div class="card-arrow">→</div>
         </div>
-        <div class="card-content">
-          <h3>排队状态</h3>
-          <p>查看当前排队号码和等待信息</p>
+        
+        <div class="card" @click="navigateTo('/queue-status')">
+          <div class="card-icon">
+            <i class="icon-queue"></i>
+          </div>
+          <div class="card-content">
+            <h3>排队状态</h3>
+            <p>查看当前排队号码和等待信息</p>
+          </div>
+          <div class="card-arrow">→</div>
         </div>
-        <div class="card-arrow">→</div>
+        
+        <div class="card" @click="navigateTo('/charging-status')">
+          <div class="card-icon">
+            <i class="icon-status"></i>
+          </div>
+          <div class="card-content">
+            <h3>充电状态</h3>
+            <p>查看当前充电状态与结束充电</p>
+          </div>
+          <div class="card-arrow">→</div>
+        </div>
+        
+        <div class="card" @click="navigateTo('/bill-records')">
+          <div class="card-icon">
+            <i class="icon-bill"></i>
+          </div>
+          <div class="card-content">
+            <h3>充电详单</h3>
+            <p>查看历史充电记录和费用</p>
+          </div>
+          <div class="card-arrow">→</div>
+        </div>
       </div>
-      
-      <div class="card" @click="navigateTo('/charging-status')">
-        <div class="card-icon">
-          <i class="icon-status"></i>
-        </div>
-        <div class="card-content">
-          <h3>充电状态</h3>
-          <p>查看当前充电状态与结束充电</p>
-        </div>
-        <div class="card-arrow">→</div>
-      </div>
-      
-      <div class="card" @click="navigateTo('/bill-records')">
-        <div class="card-icon">
-          <i class="icon-bill"></i>
-        </div>
-        <div class="card-content">
-          <h3>充电详单</h3>
-          <p>查看历史充电记录和费用</p>
-        </div>
-        <div class="card-arrow">→</div>
-      </div>
-    </div>
+    </template>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import axios from 'axios'
+import { API_BASE_URL } from '../config'
 
 const router = useRouter()
-const username = ref('用户') // 实际应用中这里应该从状态管理或API获取
+const username = ref('用户')
+const isLoading = ref(false)
 
-// 模拟统计数据
-const chargeCount = ref(5)
-const totalEnergy = ref(158)
-const totalCost = ref('132.50')
+// 统计数据
+const chargeCount = ref(0)
+const totalEnergy = ref(0)
+const totalCost = ref('0.00')
 
-// 模拟充电状态
+// 充电状态
 const hasActiveCharging = ref(false)
-const activePile = ref('快充桩 A')
-const chargedAmount = ref(8.5)
-const progressPercent = ref(42)
+const activePile = ref('')
+const chargedAmount = ref(0)
+const progressPercent = ref(0)
 
-onMounted(() => {
+// 获取用户仪表盘数据
+const fetchDashboardData = async () => {
+  try {
+    isLoading.value = true
+    const userJson = localStorage.getItem('currentUser')
+    if (!userJson) {
+      throw new Error('未找到用户信息')
+    }
+    
+    const user = JSON.parse(userJson)
+    const response = await axios.get(`${API_BASE_URL}/api/user/dashboard`, {
+      headers: {
+        'X-Username': user.username
+      }
+    })
+    const data = response.data
+
+    // 更新统计数据
+    chargeCount.value = data.stats.chargeCount
+    totalEnergy.value = data.stats.totalEnergy
+    totalCost.value = data.stats.totalCost.toFixed(2)
+
+    // 更新充电状态
+    if (data.activeCharging) {
+      hasActiveCharging.value = true
+      activePile.value = data.activeCharging.pileName
+      chargedAmount.value = data.activeCharging.chargedAmount
+      progressPercent.value = data.activeCharging.progressPercent
+    } else {
+      hasActiveCharging.value = false
+    }
+  } catch (error) {
+    console.error('获取仪表盘数据失败:', error)
+    // 如果获取数据失败，可以显示一些默认值
+    chargeCount.value = 0
+    totalEnergy.value = 0
+    totalCost.value = '0.00'
+    hasActiveCharging.value = false
+  } finally {
+    isLoading.value = false
+  }
+}
+
+onMounted(async () => {
   // 从本地存储获取用户信息
   const userJson = localStorage.getItem('currentUser')
   if (userJson) {
@@ -144,20 +197,27 @@ onMounted(() => {
     }
   }
   
-  // 模拟加载充电状态
-  setTimeout(() => {
-    hasActiveCharging.value = Math.random() > 0.5
-  }, 1000)
+  // 获取仪表盘数据
+  await fetchDashboardData()
 })
 
 const navigateTo = (path: string) => {
   router.push(path)
 }
 
-const logout = () => {
-  // 清除登录状态
-  localStorage.removeItem('currentUser')
-  router.push('/')
+const logout = async () => {
+  try {
+    // 调用登出API
+    await axios.post(`${API_BASE_URL}/api/logout`)
+    // 清除登录状态
+    localStorage.removeItem('currentUser')
+    router.push('/')
+  } catch (error) {
+    console.error('登出失败:', error)
+    // 即使API调用失败，也清除本地状态并跳转
+    localStorage.removeItem('currentUser')
+    router.push('/')
+  }
 }
 </script>
 
@@ -670,5 +730,34 @@ html, body {
 
 .status-section {
   animation-delay: 0.4s;
+}
+
+.loading-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 300px;
+  padding: 2rem;
+}
+
+.loading-spinner {
+  border: 4px solid rgba(0, 0, 0, 0.1);
+  border-radius: 50%;
+  border-top: 4px solid var(--primary-color);
+  width: 40px;
+  height: 40px;
+  animation: spin 1s linear infinite;
+  margin-bottom: 1rem;
+}
+
+.loading-text {
+  color: var(--light-text);
+  font-size: 0.9rem;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
 }
 </style> 
