@@ -57,11 +57,26 @@
             <div class="pile-card" 
               v-for="pile in chargingPiles" 
               :key="pile.id"
-              :class="{ 'status-active': pile.isActive, 'status-inactive': !pile.isActive }">
+              :class="{ 'status-active': pile.isActive, 'status-inactive': !pile.isActive, 'status-fault': pile.faultStatus?.isFault }">
               <div class="pile-header">
                 <h3>{{ pile.name }}</h3>
-                <div class="pile-status" :class="{ 'status-active': pile.isActive, 'status-inactive': !pile.isActive }">
-                  {{ pile.isActive ? '运行中' : '已关闭' }}
+                <div class="pile-status" :class="{ 
+                  'status-active': pile.isActive && !pile.faultStatus?.isFault, 
+                  'status-inactive': !pile.isActive && !pile.faultStatus?.isFault,
+                  'status-fault': pile.faultStatus?.isFault 
+                }">
+                  {{ getPileStatusText(pile) }}
+                </div>
+              </div>
+              
+              <!-- 故障信息显示 -->
+              <div v-if="pile.faultStatus?.isFault" class="fault-info">
+                <div class="fault-reason">
+                  <span class="fault-icon">⚠️</span>
+                  故障原因：{{ pile.faultStatus.reason }}
+                </div>
+                <div class="fault-time">
+                  故障时间：{{ formatDateTime(pile.faultStatus.faultTime) }}
                 </div>
               </div>
               
@@ -84,9 +99,21 @@
                 <button 
                   class="toggle-button" 
                   :class="pile.isActive ? 'stop-button' : 'start-button'"
-                  @click="togglePileStatus(pile.id)">
+                  @click="togglePileStatus(pile.id)"
+                  :disabled="pile.faultStatus?.isFault"
+                >
                   {{ pile.isActive ? '关闭充电桩' : '启动充电桩' }}
                 </button>
+                
+                <!-- 故障控制按钮 -->
+                <button 
+                  class="fault-button" 
+                  :class="pile.faultStatus?.isFault ? 'repair-button' : 'fault-set-button'"
+                  @click="toggleFaultStatus(pile)"
+                >
+                  {{ pile.faultStatus?.isFault ? '故障恢复' : '设置故障' }}
+                </button>
+                
                 <button class="view-button" @click="viewPileDetails(pile.id)">查看详情</button>
               </div>
             </div>
@@ -244,6 +271,53 @@
         </div>
       </div>
     </div>
+
+    <!-- 故障管理区域 -->
+    <div class="dashboard-section full-width" v-if="faultPiles.length > 0">
+      <div class="section-title">
+        <h2>故障处理中心</h2>
+      </div>
+
+      <div class="fault-management">
+        <div class="fault-summary">
+          <div class="fault-count">
+            <span class="count-number">{{ faultPiles.length }}</span>
+            <span class="count-label">个充电桩故障</span>
+          </div>
+          <div class="affected-cars">
+            <span class="cars-number">{{ totalAffectedCars }}</span>
+            <span class="cars-label">车辆受影响</span>
+          </div>
+        </div>
+
+        <div class="fault-list">
+          <div class="fault-item" v-for="fault in faultPiles" :key="fault.pileId">
+            <div class="fault-pile-info">
+              <h4>{{ fault.pileName }}</h4>
+              <div class="fault-details">
+                <span class="fault-reason">{{ fault.faultReason }}</span>
+                <span class="fault-time">{{ formatDateTime(fault.faultTime) }}</span>
+              </div>
+            </div>
+            
+            <div class="dispatch-actions">
+              <div class="strategy-selector">
+                <label>调度策略：</label>
+                <select v-model="selectedStrategy[fault.pileId]" @change="applyDispatchStrategy(fault.pileId)">
+                  <option value="">请选择</option>
+                  <option value="priority">优先级调度</option>
+                  <option value="time_order">时间顺序调度</option>
+                </select>
+              </div>
+              
+              <div class="affected-queue" v-if="fault.queueCount > 0">
+                <span class="queue-info">排队车辆：{{ fault.queueCount }}辆</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -264,6 +338,11 @@ interface ChargingPile {
   totalHours: number;
   totalEnergy: number;
   queueCount: number;
+  faultStatus?: {
+    isFault: boolean;
+    reason: string;
+    faultTime: string;
+  };
 }
 
 interface WaitingCar {
@@ -315,6 +394,11 @@ const reportPileId = ref('all')
 const showReport = ref(false)
 const reportData = ref<ReportData[]>([])
 const chartType = ref('charges')
+
+// 故障相关数据
+const faultPiles = ref<{ pileId: number; pileName: string; faultReason: string; faultTime: string; queueCount: number }[]>([])
+const selectedStrategy = ref<{ [pileId: number]: string }>({})
+const totalAffectedCars = ref(0)
 
 // 定时器
 let updateTimer: number | null = null
@@ -432,12 +516,137 @@ const logout = async () => {
   }
 }
 
+// 获取故障信息
+const fetchFaultInfo = async () => {
+  try {
+    const response = await axios.get(`${API_BASE_URL}/admin/faults`)
+    if (response.data.code === 200) {
+      faultPiles.value = response.data.data.faultPiles
+      totalAffectedCars.value = faultPiles.value.reduce((total, fault) => total + fault.queueCount, 0)
+    }
+  } catch (error) {
+    console.error('获取故障信息失败:', error)
+  }
+}
+
+// 获取充电桩状态文本
+const getPileStatusText = (pile: ChargingPile) => {
+  if (pile.faultStatus?.isFault) {
+    return '故障中'
+  } else if (pile.isActive) {
+    return '运行中'
+  } else {
+    return '已关闭'
+  }
+}
+
+// 格式化日期时间
+const formatDateTime = (dateTimeStr: string) => {
+  if (!dateTimeStr) return ''
+  try {
+    const date = new Date(dateTimeStr)
+    return date.toLocaleString('zh-CN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit'
+    })
+  } catch (error) {
+    return dateTimeStr
+  }
+}
+
+// 切换故障状态
+const toggleFaultStatus = async (pile: ChargingPile) => {
+  const isCurrentlyFault = pile.faultStatus?.isFault || false
+  
+  if (!isCurrentlyFault) {
+    // 设置故障
+    const faultReason = prompt('请输入故障原因：', '设备故障')
+    if (!faultReason) return
+    
+    try {
+      const response = await axios.post(`${API_BASE_URL}/admin/piles/${pile.id}/fault`, {
+        isFault: true,
+        faultReason: faultReason
+      })
+
+      if (response.data.code === 200) {
+        // 更新本地状态
+        pile.faultStatus = {
+          isFault: true,
+          reason: faultReason,
+          faultTime: response.data.data.updateTime
+        }
+        pile.isActive = false
+        
+        // 重新获取数据
+        await Promise.all([fetchStatistics(), fetchFaultInfo()])
+      }
+    } catch (error) {
+      console.error('设置充电桩故障失败:', error)
+      alert('设置故障失败，请稍后重试')
+    }
+  } else {
+    // 故障恢复
+    if (!confirm('确定要将此充电桩标记为故障恢复吗？')) return
+    
+    try {
+      const response = await axios.post(`${API_BASE_URL}/admin/piles/${pile.id}/fault`, {
+        isFault: false
+      })
+
+      if (response.data.code === 200) {
+        // 更新本地状态
+        pile.faultStatus = {
+          isFault: false,
+          reason: '',
+          faultTime: ''
+        }
+        pile.isActive = true
+        
+        // 重新获取数据
+        await Promise.all([fetchStatistics(), fetchFaultInfo()])
+      }
+    } catch (error) {
+      console.error('恢复充电桩失败:', error)
+      alert('恢复失败，请稍后重试')
+    }
+  }
+}
+
+// 应用调度策略
+const applyDispatchStrategy = async (pileId: number) => {
+  const strategy = selectedStrategy.value[pileId]
+  if (!strategy) return
+  
+  try {
+    const response = await axios.post(`${API_BASE_URL}/admin/fault/dispatch-strategy`, {
+      strategy: strategy,
+      pileId: pileId
+    })
+
+    if (response.data.code === 200) {
+      const result = response.data.data
+      alert(`调度策略已执行：${strategy === 'priority' ? '优先级调度' : '时间顺序调度'}\n受影响车辆：${result.affectedCars}辆`)
+      
+      // 重新获取数据
+      await Promise.all([fetchChargingPiles(), fetchFaultInfo()])
+    }
+  } catch (error) {
+    console.error('应用调度策略失败:', error)
+    alert('调度策略执行失败，请稍后重试')
+  }
+}
+
 // 初始化数据
 const initializeData = async () => {
   await Promise.all([
     fetchStatistics(),
     fetchChargingPiles(),
-    fetchWaitingCars()
+    fetchWaitingCars(),
+    fetchFaultInfo()
   ])
 }
 
@@ -1221,5 +1430,185 @@ html, body {
 
 .dashboard-section {
   animation: fadeIn 0.5s ease-out forwards;
+}
+
+/* 故障状态样式 */
+.status-fault .pile-status {
+  background-color: #ff5722;
+  color: white;
+}
+
+.pile-card.status-fault {
+  border-left: 4px solid #ff5722;
+  background-color: #fff3f0;
+}
+
+.fault-info {
+  background-color: #ffebee;
+  border: 1px solid #ffcdd2;
+  border-radius: 8px;
+  padding: 12px;
+  margin: 15px 0;
+}
+
+.fault-reason {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+  color: #d32f2f;
+  margin-bottom: 8px;
+}
+
+.fault-icon {
+  font-size: 18px;
+}
+
+.fault-time {
+  font-size: 12px;
+  color: #757575;
+}
+
+.fault-button {
+  padding: 8px 12px;
+  border: none;
+  border-radius: 4px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.3s;
+  flex: 1;
+}
+
+.fault-set-button {
+  background-color: #ff9800;
+  color: white;
+}
+
+.fault-set-button:hover {
+  background-color: #f57c00;
+}
+
+.repair-button {
+  background-color: #4caf50;
+  color: white;
+}
+
+.repair-button:hover {
+  background-color: #388e3c;
+}
+
+.toggle-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background-color: #ccc;
+}
+
+/* 故障管理区域样式 */
+.fault-management {
+  background-color: white;
+  border-radius: 10px;
+  padding: 20px;
+  box-shadow: var(--card-shadow);
+}
+
+.fault-summary {
+  display: flex;
+  gap: 30px;
+  padding: 20px;
+  background-color: #ffebee;
+  border-radius: 8px;
+  margin-bottom: 20px;
+}
+
+.fault-count, .affected-cars {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.count-number, .cars-number {
+  font-size: 24px;
+  font-weight: bold;
+  color: #d32f2f;
+}
+
+.count-label, .cars-label {
+  font-size: 14px;
+  color: #666;
+  margin-top: 4px;
+}
+
+.fault-list {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.fault-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 15px;
+  background-color: #f9f9f9;
+  border-radius: 8px;
+  border-left: 4px solid #ff5722;
+}
+
+.fault-pile-info h4 {
+  margin: 0 0 8px 0;
+  color: var(--text-color);
+}
+
+.fault-details {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fault-reason {
+  font-weight: 500;
+  color: #d32f2f;
+}
+
+.fault-time {
+  font-size: 12px;
+  color: #757575;
+}
+
+.dispatch-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-end;
+}
+
+.strategy-selector {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.strategy-selector label {
+  font-size: 14px;
+  color: var(--text-color);
+}
+
+.strategy-selector select {
+  padding: 8px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.affected-queue {
+  font-size: 12px;
+  color: #666;
+}
+
+.queue-info {
+  background-color: #fff3cd;
+  color: #856404;
+  padding: 4px 8px;
+  border-radius: 4px;
 }
 </style> 

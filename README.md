@@ -12,6 +12,7 @@
 前端
 ```shell
 cd Frontend
+npm install     # 第一次启动时执行，后续不需要
 npm run dev
 ```
 后端，登录接口(app.py 简单实现)

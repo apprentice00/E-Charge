@@ -191,7 +191,12 @@ mock_admin_piles = [
         "totalCharges": 12,
         "totalHours": 215,
         "totalEnergy": 864,
-        "queueCount": 3
+        "queueCount": 3,
+        "faultStatus": {
+            "isFault": False,
+            "reason": "",
+            "faultTime": ""
+        }
     },
     {
         "id": 2,
@@ -200,7 +205,12 @@ mock_admin_piles = [
         "totalCharges": 96,
         "totalHours": 190,
         "totalEnergy": 760,
-        "queueCount": 2
+        "queueCount": 2,
+        "faultStatus": {
+            "isFault": False,
+            "reason": "",
+            "faultTime": ""
+        }
     },
     {
         "id": 3,
@@ -209,7 +219,12 @@ mock_admin_piles = [
         "totalCharges": 72,
         "totalHours": 245,
         "totalEnergy": 416,
-        "queueCount": 0
+        "queueCount": 0,
+        "faultStatus": {
+            "isFault": False,
+            "reason": "",
+            "faultTime": ""
+        }
     },
     {
         "id": 4,
@@ -218,7 +233,12 @@ mock_admin_piles = [
         "totalCharges": 68,
         "totalHours": 230,
         "totalEnergy": 392,
-        "queueCount": 1
+        "queueCount": 1,
+        "faultStatus": {
+            "isFault": False,
+            "reason": "",
+            "faultTime": ""
+        }
     },
     {
         "id": 5,
@@ -227,7 +247,12 @@ mock_admin_piles = [
         "totalCharges": 83,
         "totalHours": 210,
         "totalEnergy": 352,
-        "queueCount": 0
+        "queueCount": 0,
+        "faultStatus": {
+            "isFault": False,
+            "reason": "",
+            "faultTime": ""
+        }
     }
 ]
 
@@ -682,6 +707,104 @@ def get_time_range_label(time_range):
         return f"{now.year}年第{math.ceil(now.day / 7)}周"
     else:
         return f"{now.year}-{now.month}"
+
+# 设置充电桩故障状态
+@app.route('/api/admin/piles/<int:pile_id>/fault', methods=['POST'])
+def set_pile_fault(pile_id):
+    data = request.get_json()
+    is_fault = data.get('isFault', True)
+    fault_reason = data.get('faultReason', '设备故障')
+    
+    # 查找充电桩
+    pile = next((p for p in mock_admin_piles if p['id'] == pile_id), None)
+    if not pile:
+        return jsonify({
+            "code": 404,
+            "message": "充电桩不存在"
+        }), 404
+    
+    update_time = datetime.now().isoformat()
+    
+    # 更新状态
+    if is_fault:
+        pile['isActive'] = False
+        pile['faultStatus'] = {
+            'isFault': True,
+            'reason': fault_reason,
+            'faultTime': update_time
+        }
+    else:
+        pile['isActive'] = True
+        pile['faultStatus'] = {
+            'isFault': False,
+            'reason': '',
+            'faultTime': ''
+        }
+    
+    # 更新统计数据
+    mock_admin_stats['activePiles'] = sum(1 for p in mock_admin_piles if p['isActive'])
+    
+    return jsonify({
+        "code": 200,
+        "data": {
+            "pileId": pile_id,
+            "isFault": is_fault,
+            "updateTime": update_time,
+            "faultStatus": pile['faultStatus']
+        },
+        "message": "success"
+    })
+
+# 故障调度策略设置
+@app.route('/api/admin/fault/dispatch-strategy', methods=['POST'])
+def set_fault_dispatch_strategy():
+    data = request.get_json()
+    strategy = data.get('strategy')  # 'priority' 或 'time_order'
+    pile_id = data.get('pileId')
+    
+    if strategy not in ['priority', 'time_order']:
+        return jsonify({
+            "code": 400,
+            "message": "无效的调度策略"
+        }), 400
+    
+    # 这里应该实现实际的调度逻辑
+    # 模拟处理故障调度
+    dispatch_result = {
+        "strategy": strategy,
+        "pileId": pile_id,
+        "affectedCars": 3,  # 受影响车辆数
+        "redistributionTime": datetime.now().isoformat()
+    }
+    
+    return jsonify({
+        "code": 200,
+        "data": dispatch_result,
+        "message": "调度策略已执行"
+    })
+
+# 获取故障信息
+@app.route('/api/admin/faults', methods=['GET'])
+def get_fault_info():
+    fault_piles = []
+    for pile in mock_admin_piles:
+        if 'faultStatus' in pile and pile['faultStatus']['isFault']:
+            fault_piles.append({
+                "pileId": pile['id'],
+                "pileName": pile['name'],
+                "faultReason": pile['faultStatus']['reason'],
+                "faultTime": pile['faultStatus']['faultTime'],
+                "queueCount": pile.get('queueCount', 0)
+            })
+    
+    return jsonify({
+        "code": 200,
+        "data": {
+            "faultPiles": fault_piles,
+            "totalFaultCount": len(fault_piles)
+        },
+        "message": "success"
+    })
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True) 
