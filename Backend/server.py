@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from services.user_service import UserService
 from services.charging_pile_service import charging_pile_service
+from services.queue_service import queue_service
 from database.database_manager import DatabaseManager
 from utils.response_helper import success_response, error_response
 from datetime import datetime
@@ -249,13 +250,14 @@ def get_all_users():
 def get_admin_pile_statistics():
     """获取充电桩运行统计数据"""
     try:
-        stats = charging_pile_service.get_statistics()
+        pile_stats = charging_pile_service.get_statistics()
+        queue_stats = queue_service.get_statistics()
         
-        # 转换为前端期望的格式
+        # 合并统计数据
         formatted_stats = {
-            "activePiles": stats.get("activePiles", 0),
-            "totalPiles": stats.get("totalPiles", 0),
-            "totalQueuedCars": 0,  # 暂时设为0，后续实现排队功能时更新
+            "activePiles": pile_stats.get("activePiles", 0),
+            "totalPiles": pile_stats.get("totalPiles", 0),
+            "totalQueuedCars": queue_stats.get("totalQueuedCars", 0),
             "totalRevenue": 0.0    # 暂时设为0，后续实现计费功能时更新
         }
         
@@ -369,8 +371,8 @@ def set_admin_pile_fault(pile_id):
 def get_admin_queue():
     """获取等待队列信息"""
     try:
-        # 暂时返回空队列，后续实现排队功能时更新
-        return success_response("获取队列信息成功", {"cars": []})
+        queue_info = queue_service.get_admin_queue_info()
+        return success_response("获取队列信息成功", {"cars": queue_info})
     
     except Exception as e:
         logger.error(f"获取队列信息时发生错误: {str(e)}")
@@ -490,6 +492,161 @@ def test_pile_info():
         })
     except Exception as e:
         return error_response(f"测试失败: {str(e)}", 500)
+
+# ==================== 排队管理API ====================
+
+@app.route('/api/charging/request', methods=['POST'])
+def submit_charge_request():
+    """提交充电请求"""
+    try:
+        username = request.headers.get('X-Username')
+        if not username:
+            return error_response("未提供用户信息", 401)
+        
+        data = request.get_json()
+        charge_type = data.get('chargeType')
+        target_amount = data.get('targetAmount')
+        
+        if not charge_type or not target_amount:
+            return error_response("请求参数不完整", 400)
+        
+        # 提交充电请求
+        success, message, request_info = queue_service.submit_charging_request(
+            username, charge_type, target_amount
+        )
+        
+        if success:
+            return success_response("充电请求提交成功", request_info)
+        else:
+            return error_response(message, 400)
+    
+    except Exception as e:
+        logger.error(f"提交充电请求时发生错误: {str(e)}")
+        return error_response("提交充电请求失败", 500)
+
+@app.route('/api/queue/status', methods=['GET'])
+def get_queue_status():
+    """获取排队状态"""
+    try:
+        username = request.headers.get('X-Username')
+        if not username:
+            return error_response("未提供用户信息", 401)
+        
+        queue_status = queue_service.get_queue_status(username)
+        
+        if queue_status:
+            return success_response("获取排队状态成功", queue_status)
+        else:
+            return error_response("未找到排队信息", 404)
+    
+    except Exception as e:
+        logger.error(f"获取排队状态时发生错误: {str(e)}")
+        return error_response("获取排队状态失败", 500)
+
+@app.route('/api/queue/cancel', methods=['POST'])
+def cancel_queue():
+    """取消排队"""
+    try:
+        username = request.headers.get('X-Username')
+        if not username:
+            return error_response("未提供用户信息", 401)
+        
+        data = request.get_json()
+        request_id = data.get('requestId')
+        
+        if not request_id:
+            return error_response("缺少请求ID", 400)
+        
+        success, message = queue_service.cancel_request(username, request_id)
+        
+        if success:
+            return success_response(message)
+        else:
+            return error_response(message, 400)
+    
+    except Exception as e:
+        logger.error(f"取消排队时发生错误: {str(e)}")
+        return error_response("取消排队失败", 500)
+
+@app.route('/api/queue/modify-amount', methods=['POST'])
+def modify_charge_amount():
+    """修改充电量"""
+    try:
+        username = request.headers.get('X-Username')
+        if not username:
+            return error_response("未提供用户信息", 401)
+        
+        data = request.get_json()
+        new_amount = data.get('newAmount')
+        
+        if not new_amount:
+            return error_response("缺少新充电量", 400)
+        
+        success, message = queue_service.modify_charge_amount(username, new_amount)
+        
+        if success:
+            return success_response(message)
+        else:
+            return error_response(message, 400)
+    
+    except Exception as e:
+        logger.error(f"修改充电量时发生错误: {str(e)}")
+        return error_response("修改充电量失败", 500)
+
+@app.route('/api/queue/modify-mode', methods=['POST'])
+def modify_charge_mode():
+    """修改充电模式"""
+    try:
+        username = request.headers.get('X-Username')
+        if not username:
+            return error_response("未提供用户信息", 401)
+        
+        data = request.get_json()
+        new_charge_type = data.get('newChargeType')
+        
+        if not new_charge_type:
+            return error_response("缺少新充电模式", 400)
+        
+        success, message = queue_service.modify_charge_mode(username, new_charge_type)
+        
+        if success:
+            return success_response(message)
+        else:
+            return error_response(message, 400)
+    
+    except Exception as e:
+        logger.error(f"修改充电模式时发生错误: {str(e)}")
+        return error_response("修改充电模式失败", 500)
+
+@app.route('/api/queue/charge-area', methods=['GET'])
+def get_charge_area_status():
+    """获取充电区整体状态"""
+    try:
+        charge_area_status = queue_service.get_charge_area_status()
+        return success_response("获取充电区状态成功", charge_area_status)
+    
+    except Exception as e:
+        logger.error(f"获取充电区状态时发生错误: {str(e)}")
+        return error_response("获取充电区状态失败", 500)
+
+@app.route('/api/queue/ahead-count', methods=['GET'])
+def get_queue_ahead_count():
+    """获取前车等待数量"""
+    try:
+        username = request.headers.get('X-Username')
+        if not username:
+            return error_response("未提供用户信息", 401)
+        
+        charge_mode = request.args.get('chargeMode', '快充模式')
+        ahead_count = queue_service.get_queue_ahead_count(username, charge_mode)
+        
+        return success_response("获取前车等待数量成功", {"aheadCount": ahead_count})
+    
+    except Exception as e:
+        logger.error(f"获取前车等待数量时发生错误: {str(e)}")
+        return error_response("获取前车等待数量失败", 500)
+
+
 
 if __name__ == '__main__':
     logger.info("启动智能充电桩调度计费系统...")
