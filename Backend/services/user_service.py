@@ -1,20 +1,52 @@
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from models.user_model import User
+from database.database_manager import DatabaseManager
 import re
+import logging
+
+logger = logging.getLogger(__name__)
 
 class UserService:
     """用户管理服务"""
     
-    def __init__(self):
+    def __init__(self, db_manager: Optional[DatabaseManager] = None):
         """初始化用户服务，创建内存存储"""
         # 使用字典存储用户数据，key为username，value为User对象
         self._users: Dict[str, User] = {}
         
-        # 初始化一些测试用户数据
-        self._init_default_users()
+        # 数据库管理器
+        self.db_manager = db_manager
+        
+        # 如果有数据库管理器，从数据库加载用户数据
+        if self.db_manager:
+            self._load_users_from_database()
+        else:
+            # 没有数据库管理器时，初始化默认用户
+            self._init_default_users()
+    
+    def _load_users_from_database(self):
+        """从数据库加载用户数据到内存"""
+        try:
+            users_data = self.db_manager.load_all_users()
+            
+            for user_data in users_data:
+                user = User(
+                    username=user_data["username"],
+                    password=user_data["password"],
+                    usertype=user_data["usertype"]
+                )
+                user.created_at = user_data.get("created_at")
+                user.last_login = user_data.get("last_login")
+                
+                self._users[user.username] = user
+            
+            logger.info(f"从数据库加载了 {len(users_data)} 个用户到内存")
+            
+        except Exception as e:
+            logger.error(f"从数据库加载用户数据失败: {e}")
     
     def _init_default_users(self):
-        """初始化默认用户数据"""
+        """初始化默认用户数据（内存模式）"""
         default_users = [
             {"username": "admin", "password": "123", "usertype": "admin"},
             {"username": "user", "password": "123", "usertype": "user"},
@@ -29,6 +61,37 @@ class UserService:
                 usertype=user_data["usertype"]
             )
             self._users[user.username] = user
+        
+        logger.info(f"内存模式：初始化了 {len(default_users)} 个默认用户")
+    
+    def save_users_to_database(self) -> bool:
+        """将内存中的用户数据保存到数据库"""
+        if not self.db_manager:
+            logger.warning("没有数据库管理器，无法保存数据")
+            return False
+        
+        try:
+            # 准备用户数据
+            users_data = {}
+            for username, user in self._users.items():
+                users_data[username] = {
+                    'username': user.username,
+                    'password': user.password,
+                    'usertype': user.usertype,
+                    'created_at': user.created_at,
+                    'last_login': user.last_login
+                }
+            
+            # 保存到数据库
+            success = self.db_manager.save_all_users(users_data)
+            if success:
+                logger.info(f"成功将 {len(users_data)} 个用户保存到数据库")
+            
+            return success
+            
+        except Exception as e:
+            logger.error(f"保存用户数据到数据库失败: {e}")
+            return False
     
     def _validate_username(self, username: str) -> Dict[str, Any]:
         """
@@ -117,6 +180,30 @@ class UserService:
         # 创建新用户
         try:
             new_user = User(username=username, password=password, usertype=usertype)
+            
+            # 如果有数据库管理器，先保存到数据库
+            if self.db_manager:
+                db_success = self.db_manager.add_user(
+                    username=new_user.username,
+                    password=new_user.password,
+                    usertype=new_user.usertype,
+                    created_at=new_user.created_at,
+                    last_login=new_user.last_login
+                )
+                
+                if not db_success:
+                    logger.error(f"用户 {username} 数据库保存失败")
+                    return {"success": False, "message": "数据库保存失败"}
+                
+                # 验证用户是否真的被保存到数据库
+                saved_users = self.db_manager.load_all_users()
+                if not any(u['username'] == username for u in saved_users):
+                    logger.error(f"用户 {username} 保存后验证失败")
+                    return {"success": False, "message": "数据库保存验证失败"}
+                
+                logger.info(f"用户 {username} 已确认保存到数据库")
+            
+            # 数据库保存成功后，再添加到内存
             self._users[username] = new_user
             
             return {
@@ -125,6 +212,7 @@ class UserService:
                 "data": new_user.to_dict()
             }
         except Exception as e:
+            logger.error(f"注册用户 {username} 时发生异常: {str(e)}")
             return {"success": False, "message": f"注册失败: {str(e)}"}
     
     def login_user(self, username: str, password: str) -> Dict[str, Any]:
@@ -156,6 +244,10 @@ class UserService:
         
         # 更新最后登录时间
         user.update_last_login()
+        
+        # 如果有数据库管理器，同时更新数据库
+        if self.db_manager:
+            self.db_manager.update_user_last_login(username, user.last_login)
         
         return {
             "success": True,
