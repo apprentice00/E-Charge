@@ -1,8 +1,10 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from services.user_service import UserService
+from services.charging_pile_service import charging_pile_service
 from database.database_manager import DatabaseManager
 from utils.response_helper import success_response, error_response
+from datetime import datetime
 import logging
 import atexit
 import signal
@@ -92,6 +94,7 @@ import os
 if os.environ.get('WERKZEUG_RUN_MAIN') == 'true' or not app.debug:
     logger.info("正在初始化服务...")
     init_services()
+    logger.info("充电桩系统已初始化，运行状态良好")
 else:
     logger.info("检测到Flask reloader进程，跳过初始化")
 
@@ -239,6 +242,254 @@ def get_all_users():
     except Exception as e:
         logger.error(f"获取用户列表时发生错误: {str(e)}")
         return error_response("服务器内部错误", 500)
+
+# ==================== 充电桩管理API ====================
+
+@app.route('/api/admin/statistics/piles', methods=['GET'])
+def get_admin_pile_statistics():
+    """获取充电桩运行统计数据"""
+    try:
+        stats = charging_pile_service.get_statistics()
+        
+        # 转换为前端期望的格式
+        formatted_stats = {
+            "activePiles": stats.get("activePiles", 0),
+            "totalPiles": stats.get("totalPiles", 0),
+            "totalQueuedCars": 0,  # 暂时设为0，后续实现排队功能时更新
+            "totalRevenue": 0.0    # 暂时设为0，后续实现计费功能时更新
+        }
+        
+        return success_response("获取统计数据成功", formatted_stats)
+    
+    except Exception as e:
+        logger.error(f"获取充电桩统计数据时发生错误: {str(e)}")
+        return error_response("获取统计数据失败", 500)
+
+@app.route('/api/admin/piles', methods=['GET'])
+def get_admin_piles():
+    """获取所有充电桩详细信息"""
+    try:
+        piles_data = charging_pile_service.get_all_piles()
+        
+        # 转换为前端期望的格式
+        formatted_piles = []
+        for pile in piles_data:
+            # 将字符串ID转换为数字（前端期望数字ID）
+            pile_id = ord(pile["id"]) - ord('A') + 1  # A=1, B=2, C=3, D=4, E=5
+            
+            formatted_pile = {
+                "id": pile_id,
+                "name": pile["name"],
+                "isActive": pile["isActive"],
+                "totalCharges": pile["totalCharges"],
+                "totalHours": pile["totalHours"],
+                "totalEnergy": pile["totalEnergy"],
+                "queueCount": pile["queueCount"],
+                "faultStatus": pile.get("faultStatus") or {
+                    "isFault": False,
+                    "reason": "",
+                    "faultTime": ""
+                }
+            }
+            formatted_piles.append(formatted_pile)
+        
+        return success_response("获取充电桩列表成功", {"piles": formatted_piles})
+    
+    except Exception as e:
+        logger.error(f"获取充电桩列表时发生错误: {str(e)}")
+        return error_response("获取充电桩列表失败", 500)
+
+@app.route('/api/admin/piles/<int:pile_id>/status', methods=['POST'])
+def update_admin_pile_status(pile_id):
+    """更新充电桩状态（启动/停止）"""
+    try:
+        data = request.get_json()
+        is_active = data.get('isActive')
+        
+        if is_active is None:
+            return error_response("缺少isActive参数", 400)
+        
+        # 将数字ID转换为字符串ID
+        pile_char_id = chr(ord('A') + pile_id - 1)  # 1=A, 2=B, 3=C, 4=D, 5=E
+        
+        # 更新充电桩状态
+        if is_active:
+            success = charging_pile_service.start_pile(pile_char_id)
+        else:
+            success = charging_pile_service.stop_pile(pile_char_id)
+        
+        if not success:
+            return error_response("更新充电桩状态失败", 400)
+        
+        return success_response("更新状态成功", {
+            "pileId": pile_id,
+            "isActive": is_active,
+            "updateTime": datetime.now().isoformat()
+        })
+    
+    except Exception as e:
+        logger.error(f"更新充电桩状态时发生错误: {str(e)}")
+        return error_response("更新充电桩状态失败", 500)
+
+@app.route('/api/admin/piles/<int:pile_id>/fault', methods=['POST'])
+def set_admin_pile_fault(pile_id):
+    """设置充电桩故障状态"""
+    try:
+        data = request.get_json()
+        is_fault = data.get('isFault', True)
+        fault_reason = data.get('faultReason', '设备故障')
+        
+        # 将数字ID转换为字符串ID
+        pile_char_id = chr(ord('A') + pile_id - 1)  # 1=A, 2=B, 3=C, 4=D, 5=E
+        
+        if is_fault:
+            success = charging_pile_service.set_pile_fault(pile_char_id, fault_reason)
+        else:
+            success = charging_pile_service.clear_pile_fault(pile_char_id)
+        
+        if not success:
+            return error_response("设置故障状态失败", 400)
+        
+        # 获取更新后的充电桩信息
+        pile = charging_pile_service.get_pile(pile_char_id)
+        fault_status = pile.fault_info if pile else None
+        
+        return success_response("设置故障状态成功", {
+            "pileId": pile_id,
+            "isFault": is_fault,
+            "updateTime": datetime.now().isoformat(),
+            "faultStatus": fault_status
+        })
+    
+    except Exception as e:
+        logger.error(f"设置故障状态时发生错误: {str(e)}")
+        return error_response("设置故障状态失败", 500)
+
+@app.route('/api/admin/queue', methods=['GET'])
+def get_admin_queue():
+    """获取等待队列信息"""
+    try:
+        # 暂时返回空队列，后续实现排队功能时更新
+        return success_response("获取队列信息成功", {"cars": []})
+    
+    except Exception as e:
+        logger.error(f"获取队列信息时发生错误: {str(e)}")
+        return error_response("获取队列信息失败", 500)
+
+@app.route('/api/admin/reports', methods=['GET'])
+def get_admin_reports():
+    """获取充电桩报表数据"""
+    try:
+        time_range = request.args.get('timeRange', 'day')
+        pile_id = request.args.get('pileId', 'all')
+        
+        piles_data = charging_pile_service.get_all_piles()
+        reports = []
+        
+        for pile in piles_data:
+            # 将字符串ID转换为数字
+            numeric_id = ord(pile["id"]) - ord('A') + 1
+            
+            # 如果指定了特定充电桩，只返回该充电桩的数据
+            if pile_id != 'all' and numeric_id != int(pile_id):
+                continue
+            
+            report = {
+                "id": numeric_id,
+                "timeRange": get_time_range_label(time_range),
+                "pileName": pile["name"],
+                "totalCharges": pile["totalCharges"],
+                "totalHours": pile["totalHours"],
+                "totalEnergy": pile["totalEnergy"],
+                "chargeFee": f"{(pile['totalEnergy'] * 0.7):.2f}",  # 假设平均电价0.7元/度
+                "serviceFee": f"{(pile['totalEnergy'] * 0.8):.2f}",  # 服务费0.8元/度
+                "totalFee": f"{(pile['totalEnergy'] * 1.5):.2f}"     # 总费用
+            }
+            reports.append(report)
+        
+        return success_response("获取报表数据成功", {"reports": reports})
+    
+    except Exception as e:
+        logger.error(f"获取报表数据时发生错误: {str(e)}")
+        return error_response("获取报表数据失败", 500)
+
+@app.route('/api/admin/faults', methods=['GET'])
+def get_admin_faults():
+    """获取故障信息"""
+    try:
+        piles_data = charging_pile_service.get_all_piles()
+        fault_piles = []
+        
+        for pile in piles_data:
+            if pile.get("faultStatus") and pile["faultStatus"].get("is_fault"):
+                numeric_id = ord(pile["id"]) - ord('A') + 1
+                fault_piles.append({
+                    "pileId": numeric_id,
+                    "pileName": pile["name"],
+                    "faultReason": pile["faultStatus"]["reason"],
+                    "faultTime": pile["faultStatus"]["fault_time"],
+                    "queueCount": pile["queueCount"]
+                })
+        
+        return success_response("获取故障信息成功", {
+            "faultPiles": fault_piles,
+            "totalFaultCount": len(fault_piles)
+        })
+    
+    except Exception as e:
+        logger.error(f"获取故障信息时发生错误: {str(e)}")
+        return error_response("获取故障信息失败", 500)
+
+@app.route('/api/admin/fault/dispatch-strategy', methods=['POST'])
+def set_fault_dispatch_strategy():
+    """设置故障调度策略"""
+    try:
+        data = request.get_json()
+        strategy = data.get('strategy')  # 'priority' 或 'time_order'
+        pile_id = data.get('pileId')
+        
+        if strategy not in ['priority', 'time_order']:
+            return error_response("无效的调度策略", 400)
+        
+        # 暂时返回模拟结果，后续实现调度功能时更新
+        dispatch_result = {
+            "strategy": strategy,
+            "pileId": pile_id,
+            "affectedCars": 0,  # 受影响车辆数
+            "redistributionTime": datetime.now().isoformat()
+        }
+        
+        return success_response("调度策略已执行", dispatch_result)
+    
+    except Exception as e:
+        logger.error(f"设置调度策略时发生错误: {str(e)}")
+        return error_response("设置调度策略失败", 500)
+
+def get_time_range_label(time_range):
+    """获取时间范围标签"""
+    now = datetime.now()
+    if time_range == 'day':
+        return f"{now.year}-{now.month}-{now.day}"
+    elif time_range == 'week':
+        import math
+        return f"{now.year}年第{math.ceil(now.day / 7)}周"
+    else:
+        return f"{now.year}-{now.month}"
+
+# ==================== 测试API ====================
+
+@app.route('/api/test/pile-info', methods=['GET'])
+def test_pile_info():
+    """测试API - 获取充电桩信息"""
+    try:
+        piles_data = charging_pile_service.get_all_piles()
+        return success_response("测试成功", {
+            "message": "充电桩系统运行正常",
+            "piles_count": len(piles_data),
+            "piles": piles_data
+        })
+    except Exception as e:
+        return error_response(f"测试失败: {str(e)}", 500)
 
 if __name__ == '__main__':
     logger.info("启动智能充电桩调度计费系统...")
