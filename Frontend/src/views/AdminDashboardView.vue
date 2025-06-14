@@ -107,8 +107,8 @@
                 
                 <!-- 故障控制按钮 -->
                 <button 
-                  class="fault-button" 
-                  :class="pile.faultStatus?.isFault ? 'repair-button' : 'fault-set-button'"
+                  class="fault-btn" 
+                  :class="pile.faultStatus?.isFault ? 'repair-btn' : 'fault-set-btn'"
                   @click="toggleFaultStatus(pile)"
                 >
                   {{ pile.faultStatus?.isFault ? '故障恢复' : '设置故障' }}
@@ -1063,7 +1063,7 @@ html, body {
 }
 
 /* 基础按钮样式 */
-.toggle-button, .view-button {
+.toggle-button, .view-button, .fault-btn {
   padding: 0.7rem 0;
   border-radius: 0.5rem;
   font-size: 0.9rem;
@@ -1072,16 +1072,15 @@ html, body {
   flex: 1;
   text-align: center;
   border: none;
-  
-  /* 默认隐藏 */
   opacity: 0;
   transform: translateY(10px);
-  transition: opacity 0.3s ease, transform 0.3s ease, background-color 0.3s ease;
+  transition: opacity 0.3s, transform 0.3s, background-color 0.3s;
 }
 
 /* 鼠标悬停在卡片上时显示按钮 */
 .pile-card:hover .toggle-button,
-.pile-card:hover .view-button {
+.pile-card:hover .view-button,
+.pile-card:hover .fault-btn {
   opacity: 1;
   transform: translateY(0);
 }
@@ -1109,11 +1108,11 @@ html, body {
 /* 查看详情按钮 */
 .view-button {
   background-color: var(--admin-primary-light);
-  color: var(--admin-primary-color);
+  color: black;
 }
 
 .view-button:hover {
-  background-color: rgba(25, 118, 210, 0.2);
+  background-color: #54a5e8;
 }
 
 /* 等待队列表格 */
@@ -1469,32 +1468,22 @@ html, body {
   color: #757575;
 }
 
-.fault-button {
-  padding: 8px 12px;
-  border: none;
-  border-radius: 4px;
-  font-size: 14px;
-  cursor: pointer;
-  transition: all 0.3s;
-  flex: 1;
+.fault-btn {
+  background-color: var(--green-color);
+  color: black;
 }
 
-.fault-set-button {
+.fault-btn:hover {
   background-color: #ff9800;
-  color: white;
 }
 
-.fault-set-button:hover {
-  background-color: #f57c00;
+.repair-btn {
+  background-color: rgb(255, 243, 240);
+  color: black;
 }
 
-.repair-button {
-  background-color: #4caf50;
-  color: white;
-}
-
-.repair-button:hover {
-  background-color: #388e3c;
+.repair-btn:hover {
+  background-color: #90caf9;
 }
 
 .toggle-button:disabled {

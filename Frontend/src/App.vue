@@ -10,10 +10,10 @@ const route = useRoute()
     <header v-if="route.path !== '/'">
       <div class="wrapper">
         <h1 class="app-title">充电站管理系统</h1>
-        <nav>
+        <!-- <nav>
           <RouterLink to="/">登录</RouterLink>
           <RouterLink to="/home">主页</RouterLink>
-        </nav>
+        </nav> -->
       </div> 
     </header>
 

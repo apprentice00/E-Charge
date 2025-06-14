@@ -66,6 +66,10 @@
         </span>
         {{ isActive ? '关闭充电桩' : '启动充电桩' }}
       </button>
+      <button class="fault-btn" @click="onFaultClick">
+        <span class="material-icons-outlined">report_problem</span>
+        {{ isFault ? '故障恢复' : '设置故障' }}
+      </button>
       <button class="detail-btn" @click="viewPileDetails">
         <span class="material-icons-outlined">analytics</span>
         查看详情
@@ -100,11 +104,13 @@ const props = defineProps<Props>();
 const emit = defineEmits<{
   (e: 'toggle-status', pileId: string): void;
   (e: 'view-details', pileId: string): void;
+  (e: 'toggle-fault', pileId: string): void;
 }>();
 
 const pileStatus = computed(() => `status-${props.status}`);
 const isActive = computed(() => props.status === 'active');
 const isCharging = computed(() => props.status === 'charging');
+const isFault = computed(() => props.status === 'maintenance');
 
 const statusText = computed(() => {
   switch (props.status) {
@@ -127,6 +133,10 @@ const togglePileStatus = () => {
 
 const viewPileDetails = () => {
   emit('view-details', props.pileId);
+};
+
+const onFaultClick = () => {
+  emit('toggle-fault', props.pileId);
 };
 </script>
 
@@ -328,7 +338,7 @@ const viewPileDetails = () => {
   gap: 0.8rem;
 }
 
-.control-btn, .detail-btn {
+.control-btn, .detail-btn, .fault-btn {
   padding: 0.6rem 1.2rem;
   border-radius: 50px;
   font-size: 0.9rem;
@@ -337,7 +347,16 @@ const viewPileDetails = () => {
   cursor: pointer;
   display: flex;
   align-items: center;
-  transition: all 0.2s ease;
+  transition: all 0.2s ease, opacity 0.3s, transform 0.3s;
+  opacity: 0;
+  transform: translateY(10px);
+}
+
+.charging-pile-card:hover .control-btn,
+.charging-pile-card:hover .detail-btn,
+.charging-pile-card:hover .fault-btn {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 .control-btn {
@@ -364,10 +383,27 @@ const viewPileDetails = () => {
 .detail-btn {
   background-color: rgba(0, 0, 0, 0.05);
   color: var(--text-color);
+  flex: 1;
 }
 
 .detail-btn:hover {
   background-color: rgba(0, 0, 0, 0.1);
+}
+
+.fault-btn {
+  background-color: rgba(0, 0, 0, 0.05);
+  color: var(--orange-color);
+  flex: 1;
+}
+
+.fault-btn:hover {
+  background-color: var(--orange-color);
+  color: white;
+}
+
+.fault-btn .material-icons-outlined {
+  font-size: 1.1rem;
+  margin-right: 0.5rem;
 }
 
 @media (max-width: 768px) {
