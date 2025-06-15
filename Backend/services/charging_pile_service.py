@@ -65,14 +65,23 @@ class ChargingPileService:
         with self._lock:
             return pile.start_pile()
     
-    def stop_pile(self, pile_id: str) -> bool:
-        """停止充电桩"""
+    def stop_pile(self, pile_id: str, force: bool = False) -> bool:
+        """停止充电桩
+        
+        Args:
+            pile_id: 充电桩ID
+            force: 是否强制停止（管理员权限）
+        """
         pile = self.get_pile(pile_id)
         if not pile:
             return False
         
         with self._lock:
-            return pile.stop_pile()
+            # 如果正在充电且是强制停止，需要先停止充电线程
+            if pile.status == PileStatus.CHARGING and force:
+                self._stop_charging_thread(pile_id)
+            
+            return pile.stop_pile(force)
     
     def start_charging(self, pile_id: str, user_id: str, requested_amount: float) -> bool:
         """开始充电"""

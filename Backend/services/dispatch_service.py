@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from models.queue_system_model import QueueManager, WaitingCar, QueuePosition, PileQueue
 from models.charging_session_model import ChargingSession
 from services.charging_pile_service import charging_pile_service
+from models.charging_pile_model import PileStatus
 
 class PileDispatchQueue:
     """充电桩调度队列（每桩2个车位）"""
@@ -47,13 +48,22 @@ class PileDispatchQueue:
             if self.is_full():
                 return False
             
+            # 获取充电桩状态
+            pile = charging_pile_service.get_pile(self.pile_id)
+            if not pile or not pile.is_active:
+                return False
+            
             if self.charging_car is None:
-                # 第一个车位空闲，直接开始充电
-                self.charging_car = car
-                car.queue_position = QueuePosition.CHARGING
-                car.assigned_pile_id = self.pile_id
-                self._start_charging(car)
-                return True
+                # 第一个车位空闲，且充电桩正常时才开始充电
+                if pile.status == PileStatus.ACTIVE:
+                    self.charging_car = car
+                    car.queue_position = QueuePosition.CHARGING
+                    car.assigned_pile_id = self.pile_id
+                    self._start_charging(car)
+                    return True
+                else:
+                    # 充电桩不可用，不分配车辆
+                    return False
             elif self.waiting_car is None:
                 # 第二个车位等待
                 self.waiting_car = car
@@ -218,11 +228,13 @@ class DispatchService:
     
     def _check_and_dispatch(self):
         """检查并执行调度"""
-        # 检查是否有可用充电桩空位
+        # 检查是否有可用充电桩空位（只考虑正常状态的充电桩）
         available_fast_piles = [pile_id for pile_id in ["A", "B"] 
-                               if self.pile_queues[pile_id].has_space()]
+                               if self.pile_queues[pile_id].has_space() and 
+                               charging_pile_service.get_pile(pile_id).is_active]
         available_slow_piles = [pile_id for pile_id in ["C", "D", "E"] 
-                               if self.pile_queues[pile_id].has_space()]
+                               if self.pile_queues[pile_id].has_space() and
+                               charging_pile_service.get_pile(pile_id).is_active]
         
         # 调度快充车辆
         if available_fast_piles:
@@ -239,6 +251,11 @@ class DispatchService:
         """从等候区调度车辆"""
         # 获取等候区中的车辆
         waiting_cars = self._get_waiting_cars_by_mode(charge_mode)
+        
+        # 如果没有可用的充电桩，直接返回，保持车辆在等候区
+        if not available_piles:
+            print(f"没有可用的{charge_mode}充电桩，车辆继续等待")
+            return
         
         for car in waiting_cars:
             if not available_piles:
@@ -370,28 +387,64 @@ class DispatchService:
             if pile_queue.charging_car and pile_queue.current_session:
                 session = pile_queue.current_session
                 
-                # 检查充电是否完成（使用状态或进度检查）
-                charging_completed = (
-                    session.status.value == "COMPLETED" or 
-                    session.progress_percent >= 100.0 or
-                    self._is_pile_charging_completed(pile_id)
-                )
+                # 检查充电桩状态
+                pile = charging_pile_service.get_pile(pile_id)
+                is_pile_fault = not pile.is_active or pile.status == PileStatus.MAINTENANCE
                 
-                if charging_completed:
-                    completed_car = pile_queue.complete_charging()
-                    if completed_car:
-                        print(f"充电完成：用户 {completed_car.user_id} 在充电桩 {pile_id}")
+                # 如果充电桩故障或充电完成
+                if is_pile_fault or self._is_pile_charging_completed(pile_id):
+                    try:
+                        # 结算当前充电会话
+                        from services.charging_process_service import charging_process_service
+                        charging_process_service.stop_charging_session(
+                            session.session_id,
+                            "充电桩故障" if is_pile_fault else "充电完成"
+                        )
                         
-                        # 清理活跃请求
-                        from services.queue_service import queue_service
-                        if completed_car.user_id in queue_service.active_requests:
-                            del queue_service.active_requests[completed_car.user_id]
+                        # 获取已充电量
+                        charged_amount = session.get_charged_amount()
+                        
+                        # 更新用户的请求电量（减去已充电的部分）
+                        remaining_amount = pile_queue.charging_car.requested_amount - charged_amount
+                        
+                        # 如果还有剩余电量且充电桩故障，将用户加入等候区重新等待
+                        if is_pile_fault and remaining_amount > 0:
+                            from services.queue_service import queue_service
+                            car = pile_queue.charging_car
+                            
+                            # 先从等候区移除该用户的所有请求（避免重复）
+                            waiting_cars = queue_service.queue_manager.waiting_area.cars.copy()
+                            for waiting_car in waiting_cars:
+                                if waiting_car.user_id == car.user_id:
+                                    queue_service.queue_manager.waiting_area.remove_car(waiting_car)
+                                    print(f"移除用户 {car.user_id} 的重复请求")
+                            
+                            # 更新车辆信息并加入等候区
+                            car.requested_amount = remaining_amount  # 更新剩余请求电量
+                            car.queue_position = QueuePosition.WAITING_AREA
+                            car.assigned_pile_id = None
+                            queue_service.queue_manager.waiting_area.add_car(car)
+                            print(f"充电桩 {pile_id} 故障，用户 {car.user_id} 返回等候区，剩余电量：{remaining_amount}度")
+                        
+                        # 清除充电桩状态
+                        pile_queue.charging_car = None
+                        pile_queue.current_session = None
+                        
+                        # 如果有等待的车辆且充电桩正常，开始下一个充电
+                        if not is_pile_fault and pile_queue.waiting_car:
+                            pile_queue.charging_car = pile_queue.waiting_car
+                            pile_queue.waiting_car = None
+                            pile_queue.charging_car.queue_position = QueuePosition.CHARGING
+                            pile_queue._start_charging(pile_queue.charging_car)
+                        
+                    except Exception as e:
+                        print(f"处理充电完成时发生错误: {e}")
     
     def _is_pile_charging_completed(self, pile_id: str) -> bool:
         """检查充电桩是否完成充电"""
         try:
-            pile_status = charging_pile_service.get_pile_status(pile_id)
-            return pile_status and pile_status.get("status") == "active"
+            pile = charging_pile_service.get_pile(pile_id)
+            return pile and pile.status == PileStatus.ACTIVE
         except:
             return False
     

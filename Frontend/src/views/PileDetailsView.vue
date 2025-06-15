@@ -174,18 +174,36 @@ const togglePileStatus = async () => {
   if (!pile.value) return
   
   try {
+    // 如果是关闭正在充电的充电桩，给出确认提示
+    if (pile.value.isActive && pile.value.currentCharging) {
+      const confirmed = confirm(
+        `充电桩 ${pile.value.name} 当前有车辆正在充电（用户：${pile.value.currentCharging.username}），强制关闭将会中断充电过程。\n\n确定要关闭此充电桩吗？`
+      )
+      if (!confirmed) return
+    }
+    
     const response = await axios.post(`${API_BASE_URL}/admin/piles/${pile.value.pileId}/status`, {
       isActive: !pile.value.isActive
     })
 
     if (response.data.code === 200) {
       pile.value.isActive = !pile.value.isActive
+      
+      // 显示成功提示
+      if (pile.value.isActive) {
+        alert(`充电桩 ${pile.value.name} 已成功启动`)
+      } else {
+        alert(`充电桩 ${pile.value.name} 已成功关闭`)
+      }
+      
+      // 重新获取数据以更新状态
+      await fetchPileData()
     } else {
-      alert('更新充电桩状态失败')
+      alert('更新充电桩状态失败：' + response.data.message)
     }
   } catch (error) {
     console.error('更新充电桩状态失败:', error)
-    alert('更新充电桩状态失败')
+    alert('更新充电桩状态失败，请稍后重试')
   }
 }
 

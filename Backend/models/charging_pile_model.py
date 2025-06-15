@@ -53,10 +53,18 @@ class ChargingPile:
         self.last_updated = datetime.now()
         return True
     
-    def stop_pile(self) -> bool:
-        """停止充电桩"""
-        if self.status == PileStatus.CHARGING:
-            return False  # 充电中不能停止
+    def stop_pile(self, force: bool = False) -> bool:
+        """停止充电桩
+        
+        Args:
+            force: 是否强制停止（管理员权限）
+        """
+        if self.status == PileStatus.CHARGING and not force:
+            return False  # 充电中不能停止，除非强制
+        
+        # 如果正在充电且是强制停止，先结束充电会话
+        if self.status == PileStatus.CHARGING and force:
+            self.stop_charging()
         
         self.is_active = False
         self.status = PileStatus.OFFLINE

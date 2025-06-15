@@ -9,11 +9,7 @@ from services.charging_pile_service import charging_pile_service
 from services.dispatch_service import dispatch_service
 from services.queue_service import queue_service
 from services.charging_process_service import charging_process_service
-
-class DispatchMode(Enum):
-    """调度模式"""
-    PRIORITY = "priority"      # 优先级调度
-    TIME_ORDER = "time_order"  # 时间顺序调度
+from config import Config, DispatchMode
 
 class FaultStatus(Enum):
     """故障状态"""
@@ -34,7 +30,7 @@ class ChargingFaultService:
         
         # 服务状态
         self.waiting_area_service_paused = False  # 等候区叫号服务状态
-        self.dispatch_mode = DispatchMode.PRIORITY  # 默认优先级调度
+        self.dispatch_mode = Config.DEFAULT_DISPATCH_MODE  # 从配置文件获取默认调度模式
         
         # 初始化所有充电桩为正常状态
         for pile_id in ["A", "B", "C", "D", "E"]:

@@ -401,7 +401,7 @@ class QueueService:
         """获取管理员队列信息"""
         with self._lock:
             admin_queue = []
-            dispatched_users = set()  # 记录已被调度的用户，避免重复显示
+            processed_users = set()  # 记录已处理的用户，避免重复显示
             
             # 首先从调度系统获取实际的充电和队列状态
             try:
@@ -414,59 +414,66 @@ class QueueService:
                     # 正在充电的车辆
                     if pile_queue.charging_car:
                         car = pile_queue.charging_car
-                        dispatched_users.add(car.user_id)  # 标记为已调度
-                        
-                        admin_queue.append({
-                            "id": len(admin_queue) + 1,
-                            "pileName": pile_name,
-                            "userId": car.user_id,
-                            "batteryCapacity": getattr(car, 'battery_capacity', 60),
-                            "requestedCharge": car.requested_amount,
-                            "queueTime": "0分钟",  # 正在充电的车辆等待时间为0
-                            "status": "充电中",
-                            "statusClass": "charging"
-                        })
+                        if car.user_id not in processed_users:  # 检查是否已处理
+                            processed_users.add(car.user_id)  # 标记为已处理
+                            
+                            admin_queue.append({
+                                "id": len(admin_queue) + 1,
+                                "pileName": pile_name,
+                                "userId": car.user_id,
+                                "batteryCapacity": getattr(car, 'battery_capacity', 60),
+                                "requestedCharge": car.requested_amount,
+                                "queueTime": "0分钟",  # 正在充电的车辆等待时间为0
+                                "status": "充电中",
+                                "statusClass": "charging"
+                            })
                     
                     # 在充电桩队列等待的车辆
                     if pile_queue.waiting_car:
                         car = pile_queue.waiting_car
-                        dispatched_users.add(car.user_id)  # 标记为已调度
-                        
-                        wait_time = ""
-                        if hasattr(car, 'join_time') and car.join_time:
-                            elapsed = datetime.now() - car.join_time
-                            minutes = int(elapsed.total_seconds() / 60)
-                            wait_time = f"{minutes}分钟"
-                        
-                        admin_queue.append({
-                            "id": len(admin_queue) + 1,
-                            "pileName": pile_name,
-                            "userId": car.user_id,
-                            "batteryCapacity": getattr(car, 'battery_capacity', 60),
-                            "requestedCharge": car.requested_amount,
-                            "queueTime": wait_time,
-                            "status": "排队中(第1位)",
-                            "statusClass": "waiting"
-                        })
-                
+                        if car.user_id not in processed_users:  # 检查是否已处理
+                            processed_users.add(car.user_id)  # 标记为已处理
+                            
+                            wait_time = ""
+                            if hasattr(car, 'join_time') and car.join_time:
+                                elapsed = datetime.now() - car.join_time
+                                minutes = int(elapsed.total_seconds() / 60)
+                                wait_time = f"{minutes}分钟"
+                            
+                            admin_queue.append({
+                                "id": len(admin_queue) + 1,
+                                "pileName": pile_name,
+                                "userId": car.user_id,
+                                "batteryCapacity": getattr(car, 'battery_capacity', 60),
+                                "requestedCharge": car.requested_amount,
+                                "queueTime": wait_time,
+                                "status": "排队中(第1位)",
+                                "statusClass": "waiting"
+                            })
+            
             except Exception as e:
                 print(f"获取调度系统状态时出错: {e}")
             
-            # 然后获取等候区的车辆（仅显示未被调度的）
-            queue_info = self.queue_manager.get_all_queue_info()
-            for car_data in queue_info["waitingArea"]:
-                # 只显示未被调度到充电桩的用户
-                if car_data["userId"] not in dispatched_users:
-                    admin_queue.append({
-                        "id": len(admin_queue) + 1,
-                        "pileName": "等候区",
-                        "userId": car_data["userId"],
-                        "batteryCapacity": car_data["batteryCapacity"],
-                        "requestedCharge": car_data["requestedAmount"],
-                        "queueTime": car_data["queueTime"],
-                        "status": "等候中",
-                        "statusClass": "waiting"
-                    })
+            # 然后获取等候区的车辆（仅显示未被处理的）
+            try:
+                queue_info = self.queue_manager.get_all_queue_info()
+                for car_data in queue_info["waitingArea"]:
+                    # 只显示未被处理的用户
+                    if car_data["userId"] not in processed_users:
+                        processed_users.add(car_data["userId"])  # 标记为已处理
+                        
+                        admin_queue.append({
+                            "id": len(admin_queue) + 1,
+                            "pileName": "等候区",
+                            "userId": car_data["userId"],
+                            "batteryCapacity": car_data["batteryCapacity"],
+                            "requestedCharge": car_data["requestedAmount"],
+                            "queueTime": car_data["queueTime"],
+                            "status": "等候中",
+                            "statusClass": "waiting"
+                        })
+            except Exception as e:
+                print(f"获取等候区状态时出错: {e}")
             
             return admin_queue
     

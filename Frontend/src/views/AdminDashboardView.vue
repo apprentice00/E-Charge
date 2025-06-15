@@ -15,33 +15,6 @@
       </div>
     </div>
     
-    <!-- 核心指标卡片 -->
-    <div class="dashboard-stats">
-      <div class="stat-card">
-        <div class="stat-icon pile-icon"></div>
-        <div class="stat-content">
-          <div class="stat-value">{{ activePiles }}/{{ totalPiles }}</div>
-          <div class="stat-label">运行中充电桩</div>
-        </div>
-      </div>
-      
-      <div class="stat-card">
-        <div class="stat-icon queue-icon"></div>
-        <div class="stat-content">
-          <div class="stat-value">{{ totalQueuedCars }}</div>
-          <div class="stat-label">排队车辆总数</div>
-        </div>
-      </div>
-      
-      <div class="stat-card">
-        <div class="stat-icon revenue-icon"></div>
-        <div class="stat-content">
-          <div class="stat-value">¥{{ totalRevenue }}</div>
-          <div class="stat-label">今日总收入</div>
-        </div>
-      </div>
-    </div>
-
     <!-- 主要内容区 -->
     <div class="dashboard-main">
       <!-- 左侧列 -->
@@ -50,33 +23,20 @@
         <div class="dashboard-section">
           <div class="section-title">
             <h2>充电桩管理</h2>
-            <!-- <div class="subtitle">查看和控制充电桩状态</div> -->
           </div>
 
           <div class="pile-management">
             <div class="pile-card" 
               v-for="pile in chargingPiles" 
               :key="pile.id"
-              :class="{ 'status-active': pile.isActive, 'status-inactive': !pile.isActive, 'status-fault': pile.faultStatus?.isFault }">
+              :class="{ 'status-active': pile.isActive, 'status-inactive': !pile.isActive }">
               <div class="pile-header">
                 <h3>{{ pile.name }}</h3>
                 <div class="pile-status" :class="{ 
-                  'status-active': pile.isActive && !pile.faultStatus?.isFault, 
-                  'status-inactive': !pile.isActive && !pile.faultStatus?.isFault,
-                  'status-fault': pile.faultStatus?.isFault 
+                  'status-active': pile.isActive, 
+                  'status-inactive': !pile.isActive
                 }">
                   {{ getPileStatusText(pile) }}
-                </div>
-              </div>
-              
-              <!-- 故障信息显示 -->
-              <div v-if="pile.faultStatus?.isFault" class="fault-info">
-                <div class="fault-reason">
-                  <span class="fault-icon">⚠️</span>
-                  故障原因：{{ pile.faultStatus.reason }}
-                </div>
-                <div class="fault-time">
-                  故障时间：{{ formatDateTime(pile.faultStatus.faultTime) }}
                 </div>
               </div>
               
@@ -100,18 +60,8 @@
                   class="toggle-button" 
                   :class="pile.isActive ? 'stop-button' : 'start-button'"
                   @click="togglePileStatus(pile.id)"
-                  :disabled="pile.faultStatus?.isFault"
                 >
                   {{ pile.isActive ? '关闭充电桩' : '启动充电桩' }}
-                </button>
-                
-                <!-- 故障控制按钮 -->
-                <button 
-                  class="fault-btn" 
-                  :class="pile.faultStatus?.isFault ? 'repair-btn' : 'fault-set-btn'"
-                  @click="toggleFaultStatus(pile)"
-                >
-                  {{ pile.faultStatus?.isFault ? '故障恢复' : '设置故障' }}
                 </button>
                 
                 <button class="view-button" @click="viewPileDetails(pile.id)">查看详情</button>
@@ -127,7 +77,6 @@
         <div class="dashboard-section">
           <div class="section-title">
             <h2>车辆服务队列</h2>
-            <!-- <div class="subtitle">查看等候服务的车辆信息</div> -->
           </div>
 
           <div class="waiting-queue">
@@ -164,7 +113,6 @@
     <div class="dashboard-section full-width">
       <div class="section-title">
         <h2>充电数据报表</h2>
-        <!-- <div class="subtitle">查看充电统计数据</div> -->
       </div>
 
       <div class="report-section">
@@ -272,57 +220,12 @@
       </div>
     </div>
 
-    <!-- 故障管理区域 -->
-    <div class="dashboard-section full-width" v-if="faultPiles.length > 0">
-      <div class="section-title">
-        <h2>故障处理中心</h2>
-      </div>
 
-      <div class="fault-management">
-        <div class="fault-summary">
-          <div class="fault-count">
-            <span class="count-number">{{ faultPiles.length }}</span>
-            <span class="count-label">个充电桩故障</span>
-          </div>
-          <div class="affected-cars">
-            <span class="cars-number">{{ totalAffectedCars }}</span>
-            <span class="cars-label">车辆受影响</span>
-          </div>
-        </div>
-
-        <div class="fault-list">
-          <div class="fault-item" v-for="fault in faultPiles" :key="fault.pileId">
-            <div class="fault-pile-info">
-              <h4>{{ fault.pileName }}</h4>
-              <div class="fault-details">
-                <span class="fault-reason">{{ fault.faultReason }}</span>
-                <span class="fault-time">{{ formatDateTime(fault.faultTime) }}</span>
-              </div>
-            </div>
-            
-            <div class="dispatch-actions">
-              <div class="strategy-selector">
-                <label>调度策略：</label>
-                <select v-model="selectedStrategy[fault.pileId]" @change="applyDispatchStrategy(fault.pileId)">
-                  <option value="">请选择</option>
-                  <option value="priority">优先级调度</option>
-                  <option value="time_order">时间顺序调度</option>
-                </select>
-              </div>
-              
-              <div class="affected-queue" v-if="fault.queueCount > 0">
-                <span class="queue-info">排队车辆：{{ fault.queueCount }}辆</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from 'axios'
 
@@ -368,25 +271,12 @@ interface ReportData {
   totalFee: string;
 }
 
-interface Statistics {
-  activePiles: number;
-  totalPiles: number;
-  totalQueuedCars: number;
-  totalRevenue: number;
-}
-
 const router = useRouter()
 const username = ref('管理员')
 
 // 状态数据
 const chargingPiles = ref<ChargingPile[]>([])
 const waitingCars = ref<WaitingCar[]>([])
-const statistics = ref<Statistics>({
-  activePiles: 0,
-  totalPiles: 0,
-  totalQueuedCars: 0,
-  totalRevenue: 0
-})
 
 // 报表相关数据
 const reportTimeRange = ref('day')
@@ -395,26 +285,10 @@ const showReport = ref(false)
 const reportData = ref<ReportData[]>([])
 const chartType = ref('charges')
 
-// 故障相关数据
-const faultPiles = ref<{ pileId: number; pileName: string; faultReason: string; faultTime: string; queueCount: number }[]>([])
-const selectedStrategy = ref<{ [pileId: number]: string }>({})
-const totalAffectedCars = ref(0)
-
 // 定时器
 let updateTimer: number | null = null
 
 // API请求函数
-const fetchStatistics = async () => {
-  try {
-    const response = await axios.get(`${API_BASE_URL}/admin/statistics/piles`)
-    if (response.data.code === 200) {
-      statistics.value = response.data.data
-    }
-  } catch (error) {
-    console.error('获取统计数据失败:', error)
-  }
-}
-
 const fetchChargingPiles = async () => {
   try {
     const response = await axios.get(`${API_BASE_URL}/admin/piles`)
@@ -462,6 +336,21 @@ const togglePileStatus = async (pileId: number) => {
     const pile = chargingPiles.value.find(p => p.id === pileId)
     if (!pile) return
 
+    // 如果是关闭正在充电的充电桩，给出确认提示
+    if (pile.isActive && getPileStatusText(pile) === '运行中') {
+      // 检查是否有充电中的车辆
+      const hasChargingCar = waitingCars.value.some(car => 
+        car.pileName === pile.name && car.status === '充电中'
+      )
+      
+      if (hasChargingCar) {
+        const confirmed = confirm(
+          `充电桩 ${pile.name} 当前有车辆正在充电，强制关闭将会中断充电过程。\n\n确定要关闭此充电桩吗？`
+        )
+        if (!confirmed) return
+      }
+    }
+
     const response = await axios.post(`${API_BASE_URL}/admin/piles/${pileId}/status`, {
       isActive: !pile.isActive
     })
@@ -469,11 +358,19 @@ const togglePileStatus = async (pileId: number) => {
     if (response.data.code === 200) {
       // 更新本地状态
       pile.isActive = !pile.isActive
-      // 重新获取统计数据
-      await fetchStatistics()
+      
+      // 显示成功提示
+      if (pile.isActive) {
+        alert(`充电桩 ${pile.name} 已成功启动`)
+      } else {
+        alert(`充电桩 ${pile.name} 已成功关闭`)
+      }
+    } else {
+      alert('更新充电桩状态失败：' + response.data.message)
     }
   } catch (error) {
     console.error('更新充电桩状态失败:', error)
+    alert('更新充电桩状态失败，请稍后重试')
   }
 }
 
@@ -487,11 +384,14 @@ const generateReport = () => {
   fetchReportData()
 }
 
-// 计算属性
-const activePiles = computed(() => statistics.value.activePiles)
-const totalPiles = computed(() => statistics.value.totalPiles)
-const totalQueuedCars = computed(() => statistics.value.totalQueuedCars)
-const totalRevenue = computed(() => statistics.value.totalRevenue)
+// 获取充电桩状态文本
+const getPileStatusText = (pile: ChargingPile) => {
+  if (pile.isActive) {
+    return '运行中'
+  } else {
+    return '已关闭'
+  }
+}
 
 // 图表相关方法
 const getBarHeight = (report: ReportData) => {
@@ -526,137 +426,11 @@ const logout = async () => {
   }
 }
 
-// 获取故障信息
-const fetchFaultInfo = async () => {
-  try {
-    const response = await axios.get(`${API_BASE_URL}/admin/faults`)
-    if (response.data.code === 200) {
-      faultPiles.value = response.data.data.faultPiles
-      totalAffectedCars.value = faultPiles.value.reduce((total, fault) => total + fault.queueCount, 0)
-    }
-  } catch (error) {
-    console.error('获取故障信息失败:', error)
-  }
-}
-
-// 获取充电桩状态文本
-const getPileStatusText = (pile: ChargingPile) => {
-  if (pile.faultStatus?.isFault) {
-    return '故障中'
-  } else if (pile.isActive) {
-    return '运行中'
-  } else {
-    return '已关闭'
-  }
-}
-
-// 格式化日期时间
-const formatDateTime = (dateTimeStr: string) => {
-  if (!dateTimeStr) return ''
-  try {
-    const date = new Date(dateTimeStr)
-    return date.toLocaleString('zh-CN', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit'
-    })
-  } catch (error) {
-    return dateTimeStr
-  }
-}
-
-// 切换故障状态
-const toggleFaultStatus = async (pile: ChargingPile) => {
-  const isCurrentlyFault = pile.faultStatus?.isFault || false
-  
-  if (!isCurrentlyFault) {
-    // 设置故障
-    const faultReason = prompt('请输入故障原因：', '设备故障')
-    if (!faultReason) return
-    
-    try {
-      const response = await axios.post(`${API_BASE_URL}/admin/piles/${pile.id}/fault`, {
-        isFault: true,
-        faultReason: faultReason
-      })
-
-      if (response.data.code === 200) {
-        // 更新本地状态
-        pile.faultStatus = {
-          isFault: true,
-          reason: faultReason,
-          faultTime: response.data.data.updateTime
-        }
-        pile.isActive = false
-        
-        // 重新获取数据
-        await Promise.all([fetchStatistics(), fetchFaultInfo()])
-      }
-    } catch (error) {
-      console.error('设置充电桩故障失败:', error)
-      alert('设置故障失败，请稍后重试')
-    }
-  } else {
-    // 故障恢复
-    if (!confirm('确定要将此充电桩标记为故障恢复吗？')) return
-    
-    try {
-      const response = await axios.post(`${API_BASE_URL}/admin/piles/${pile.id}/fault`, {
-        isFault: false
-      })
-
-      if (response.data.code === 200) {
-        // 更新本地状态
-        pile.faultStatus = {
-          isFault: false,
-          reason: '',
-          faultTime: ''
-        }
-        pile.isActive = true
-        
-        // 重新获取数据
-        await Promise.all([fetchStatistics(), fetchFaultInfo()])
-      }
-    } catch (error) {
-      console.error('恢复充电桩失败:', error)
-      alert('恢复失败，请稍后重试')
-    }
-  }
-}
-
-// 应用调度策略
-const applyDispatchStrategy = async (pileId: number) => {
-  const strategy = selectedStrategy.value[pileId]
-  if (!strategy) return
-  
-  try {
-    const response = await axios.post(`${API_BASE_URL}/admin/fault/dispatch-strategy`, {
-      strategy: strategy,
-      pileId: pileId
-    })
-
-    if (response.data.code === 200) {
-      const result = response.data.data
-      alert(`调度策略已执行：${strategy === 'priority' ? '优先级调度' : '时间顺序调度'}\n受影响车辆：${result.affectedCars}辆`)
-      
-      // 重新获取数据
-      await Promise.all([fetchChargingPiles(), fetchFaultInfo()])
-    }
-  } catch (error) {
-    console.error('应用调度策略失败:', error)
-    alert('调度策略执行失败，请稍后重试')
-  }
-}
-
 // 初始化数据
 const initializeData = async () => {
   await Promise.all([
-    fetchStatistics(),
     fetchChargingPiles(),
-    fetchWaitingCars(),
-    fetchFaultInfo()
+    fetchWaitingCars()
   ])
 }
 
@@ -815,97 +589,6 @@ html, body {
   background-color: rgba(0, 0, 0, 0.03);
   color: var(--text-color);
   border-color: var(--admin-primary-color);
-}
-
-/* 核心指标卡片 */
-.dashboard-stats {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-  gap: 1.5rem;
-  margin-bottom: 1rem;
-}
-
-.stat-card {
-  background-color: var(--section-bg);
-  border-radius: 1rem;
-  padding: 1.5rem;
-  box-shadow: var(--card-shadow);
-  display: flex;
-  align-items: center;
-  gap: 1.2rem;
-  transition: all var(--transition-time);
-  border-bottom: 3px solid transparent;
-}
-
-.stat-card:nth-child(1) {
-  border-bottom-color: var(--blue-color);
-}
-
-.stat-card:nth-child(2) {
-  border-bottom-color: var(--orange-color);
-}
-
-.stat-card:nth-child(3) {
-  border-bottom-color: var(--green-color);
-}
-
-.stat-card:hover {
-  transform: translateY(-5px);
-  box-shadow: var(--card-hover-shadow);
-}
-
-.stat-icon {
-  width: 3.2rem;
-  height: 3.2rem;
-  border-radius: 1rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1.6rem;
-  flex-shrink: 0;
-}
-
-.pile-icon {
-  background-color: rgba(33, 150, 243, 0.1);
-  color: var(--blue-color);
-}
-
-.pile-icon::before {
-  content: "🔌";
-}
-
-.queue-icon {
-  background-color: rgba(255, 152, 0, 0.1);
-  color: var(--orange-color);
-}
-
-.queue-icon::before {
-  content: "🚗";
-}
-
-.revenue-icon {
-  background-color: rgba(76, 175, 80, 0.1);
-  color: var(--green-color);
-}
-
-.revenue-icon::before {
-  content: "¥";
-}
-
-.stat-content {
-  flex: 1;
-}
-
-.stat-value {
-  font-size: 1.5rem;
-  font-weight: 600;
-  margin-bottom: 0.2rem;
-  color: var(--text-color);
-}
-
-.stat-label {
-  font-size: 0.9rem;
-  color: var(--light-text);
 }
 
 /* 主要内容布局 */
@@ -1441,173 +1124,5 @@ html, body {
   animation: fadeIn 0.5s ease-out forwards;
 }
 
-/* 故障状态样式 */
-.status-fault .pile-status {
-  background-color: #ff5722;
-  color: white;
-}
 
-.pile-card.status-fault {
-  border-left: 4px solid #ff5722;
-  background-color: #fff3f0;
-}
-
-.fault-info {
-  background-color: #ffebee;
-  border: 1px solid #ffcdd2;
-  border-radius: 8px;
-  padding: 12px;
-  margin: 15px 0;
-}
-
-.fault-reason {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 500;
-  color: #d32f2f;
-  margin-bottom: 8px;
-}
-
-.fault-icon {
-  font-size: 18px;
-}
-
-.fault-time {
-  font-size: 12px;
-  color: #757575;
-}
-
-.fault-btn {
-  background-color: var(--green-color);
-  color: black;
-}
-
-.fault-btn:hover {
-  background-color: #ff9800;
-}
-
-.repair-btn {
-  background-color: rgb(255, 243, 240);
-  color: black;
-}
-
-.repair-btn:hover {
-  background-color: #90caf9;
-}
-
-.toggle-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-  background-color: #ccc;
-}
-
-/* 故障管理区域样式 */
-.fault-management {
-  background-color: white;
-  border-radius: 10px;
-  padding: 20px;
-  box-shadow: var(--card-shadow);
-}
-
-.fault-summary {
-  display: flex;
-  gap: 30px;
-  padding: 20px;
-  background-color: #ffebee;
-  border-radius: 8px;
-  margin-bottom: 20px;
-}
-
-.fault-count, .affected-cars {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.count-number, .cars-number {
-  font-size: 24px;
-  font-weight: bold;
-  color: #d32f2f;
-}
-
-.count-label, .cars-label {
-  font-size: 14px;
-  color: #666;
-  margin-top: 4px;
-}
-
-.fault-list {
-  display: flex;
-  flex-direction: column;
-  gap: 15px;
-}
-
-.fault-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 15px;
-  background-color: #f9f9f9;
-  border-radius: 8px;
-  border-left: 4px solid #ff5722;
-}
-
-.fault-pile-info h4 {
-  margin: 0 0 8px 0;
-  color: var(--text-color);
-}
-
-.fault-details {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.fault-reason {
-  font-weight: 500;
-  color: #d32f2f;
-}
-
-.fault-time {
-  font-size: 12px;
-  color: #757575;
-}
-
-.dispatch-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  align-items: flex-end;
-}
-
-.strategy-selector {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.strategy-selector label {
-  font-size: 14px;
-  color: var(--text-color);
-}
-
-.strategy-selector select {
-  padding: 8px 12px;
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  font-size: 14px;
-}
-
-.affected-queue {
-  font-size: 12px;
-  color: #666;
-}
-
-.queue-info {
-  background-color: #fff3cd;
-  color: #856404;
-  padding: 4px 8px;
-  border-radius: 4px;
-}
 </style> 

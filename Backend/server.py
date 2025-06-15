@@ -2,10 +2,11 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from services.user_service import UserService
 from services.charging_pile_service import charging_pile_service
-from services.queue_service import queue_service
 from services.dispatch_service import dispatch_service
+from services.queue_service import queue_service
 from services.charging_process_service import charging_process_service
-from services.charging_fault_service import charging_fault_service, DispatchMode
+from services.charging_fault_service import charging_fault_service
+from config import DispatchMode
 from database.database_manager import DatabaseManager
 from utils.response_helper import success_response, error_response
 from datetime import datetime
@@ -380,7 +381,7 @@ def get_admin_piles():
 
 @app.route('/api/admin/piles/<int:pile_id>/status', methods=['POST'])
 def update_admin_pile_status(pile_id):
-    """更新充电桩状态（启动/停止）"""
+    """更新充电桩状态（启动/停止，关闭时触发故障处理）"""
     try:
         data = request.get_json()
         is_active = data.get('isActive')
@@ -393,56 +394,40 @@ def update_admin_pile_status(pile_id):
         
         # 更新充电桩状态
         if is_active:
-            success = charging_pile_service.start_pile(pile_char_id)
+            # 启动充电桩 - 触发故障恢复处理
+            from services.charging_fault_service import charging_fault_service
+            recovery_result = charging_fault_service.handle_pile_recovery(pile_char_id)
+            
+            if not recovery_result["success"]:
+                return error_response(f"充电桩启动失败: {recovery_result['message']}", 400)
+            
+            return success_response("充电桩启动成功", {
+                "pileId": pile_id,
+                "isActive": is_active,
+                "updateTime": datetime.now().isoformat(),
+                "rescheduledCars": recovery_result["rescheduled_cars"]
+            })
         else:
-            success = charging_pile_service.stop_pile(pile_char_id)
-        
-        if not success:
-            return error_response("更新充电桩状态失败", 400)
-        
-        return success_response("更新状态成功", {
-            "pileId": pile_id,
-            "isActive": is_active,
-            "updateTime": datetime.now().isoformat()
-        })
+            # 关闭充电桩 - 触发故障处理
+            from services.charging_fault_service import charging_fault_service
+            fault_result = charging_fault_service.handle_pile_fault(pile_char_id, "管理员手动关闭")
+            
+            if not fault_result["success"]:
+                return error_response(f"充电桩关闭失败: {fault_result['message']}", 400)
+            
+            return success_response("充电桩关闭成功", {
+                "pileId": pile_id,
+                "isActive": is_active,
+                "updateTime": datetime.now().isoformat(),
+                "affectedCars": fault_result["affected_cars"],
+                "billingRecords": fault_result["billing_records"]
+            })
     
     except Exception as e:
         logger.error(f"更新充电桩状态时发生错误: {str(e)}")
         return error_response("更新充电桩状态失败", 500)
 
-@app.route('/api/admin/piles/<int:pile_id>/fault', methods=['POST'])
-def set_admin_pile_fault(pile_id):
-    """设置充电桩故障状态"""
-    try:
-        data = request.get_json()
-        is_fault = data.get('isFault', True)
-        fault_reason = data.get('faultReason', '设备故障')
-        
-        # 将数字ID转换为字符串ID
-        pile_char_id = chr(ord('A') + pile_id - 1)  # 1=A, 2=B, 3=C, 4=D, 5=E
-        
-        if is_fault:
-            success = charging_pile_service.set_pile_fault(pile_char_id, fault_reason)
-        else:
-            success = charging_pile_service.clear_pile_fault(pile_char_id)
-        
-        if not success:
-            return error_response("设置故障状态失败", 400)
-        
-        # 获取更新后的充电桩信息
-        pile = charging_pile_service.get_pile(pile_char_id)
-        fault_status = pile.fault_info if pile else None
-        
-        return success_response("设置故障状态成功", {
-            "pileId": pile_id,
-            "isFault": is_fault,
-            "updateTime": datetime.now().isoformat(),
-            "faultStatus": fault_status
-        })
-    
-    except Exception as e:
-        logger.error(f"设置故障状态时发生错误: {str(e)}")
-        return error_response("设置故障状态失败", 500)
+
 
 @app.route('/api/admin/queue', methods=['GET'])
 def get_admin_queue():
@@ -549,57 +534,7 @@ def get_admin_pile_details(pile_id):
         logger.error(f"获取充电桩详情时发生错误: {str(e)}")
         return error_response("获取充电桩详情失败", 500)
 
-@app.route('/api/admin/faults', methods=['GET'])
-def get_admin_faults():
-    """获取故障信息"""
-    try:
-        piles_data = charging_pile_service.get_all_piles()
-        fault_piles = []
-        
-        for pile in piles_data:
-            if pile.get("faultStatus") and pile["faultStatus"].get("is_fault"):
-                numeric_id = ord(pile["id"]) - ord('A') + 1
-                fault_piles.append({
-                    "pileId": numeric_id,
-                    "pileName": pile["name"],
-                    "faultReason": pile["faultStatus"]["reason"],
-                    "faultTime": pile["faultStatus"]["fault_time"],
-                    "queueCount": pile["queueCount"]
-                })
-        
-        return success_response("获取故障信息成功", {
-            "faultPiles": fault_piles,
-            "totalFaultCount": len(fault_piles)
-        })
-    
-    except Exception as e:
-        logger.error(f"获取故障信息时发生错误: {str(e)}")
-        return error_response("获取故障信息失败", 500)
 
-@app.route('/api/admin/fault/dispatch-strategy', methods=['POST'])
-def set_fault_dispatch_strategy():
-    """设置故障调度策略"""
-    try:
-        data = request.get_json()
-        strategy = data.get('strategy')  # 'priority' 或 'time_order'
-        pile_id = data.get('pileId')
-        
-        if strategy not in ['priority', 'time_order']:
-            return error_response("无效的调度策略", 400)
-        
-        # 暂时返回模拟结果，后续实现调度功能时更新
-        dispatch_result = {
-            "strategy": strategy,
-            "pileId": pile_id,
-            "affectedCars": 0,  # 受影响车辆数
-            "redistributionTime": datetime.now().isoformat()
-        }
-        
-        return success_response("调度策略已执行", dispatch_result)
-    
-    except Exception as e:
-        logger.error(f"设置调度策略时发生错误: {str(e)}")
-        return error_response("设置调度策略失败", 500)
 
 def get_time_range_label(time_range):
     """获取时间范围标签"""
@@ -1347,203 +1282,7 @@ def get_charging_records():
         logger.error(f"获取充电记录时发生错误: {str(e)}")
         return error_response("获取充电记录失败", 500)
 
-# ==================== 故障处理API ====================
 
-@app.route('/api/admin/fault/handle', methods=['POST'])
-def handle_pile_fault():
-    """处理充电桩故障"""
-    try:
-        # 检查管理员权限
-        username = request.headers.get('X-Username')
-        if not username:
-            return error_response("未提供用户信息", 401)
-        
-        # 验证管理员权限
-        current_user = user_service.get_user_info(username)
-        if not current_user['success'] or current_user['data']['usertype'] != 'admin':
-            return error_response("权限不足", 403)
-        
-        data = request.get_json()
-        if not data:
-            return error_response("请求数据不能为空", 400)
-        
-        pile_id = data.get('pileId', '').strip()
-        fault_reason = data.get('faultReason', '设备故障').strip()
-        
-        if not pile_id:
-            return error_response("充电桩ID不能为空", 400)
-        
-        # 将数字ID转换为字符串ID (如果需要)
-        if pile_id.isdigit():
-            pile_char_id = chr(ord('A') + int(pile_id) - 1)
-        else:
-            pile_char_id = pile_id.upper()
-        
-        # 处理故障
-        result = charging_fault_service.handle_pile_fault(pile_char_id, fault_reason)
-        
-        if result["success"]:
-            return success_response(result["message"], {
-                "pileId": pile_char_id,
-                "affectedCars": result["affected_cars"],
-                "billingRecords": result["billing_records"],
-                "timestamp": datetime.now().isoformat()
-            })
-        else:
-            return error_response(result["message"], 400)
-    
-    except Exception as e:
-        logger.error(f"处理故障时发生错误: {str(e)}")
-        return error_response("处理故障失败", 500)
-
-@app.route('/api/admin/fault/recovery', methods=['POST'])
-def handle_pile_recovery():
-    """处理充电桩恢复"""
-    try:
-        # 检查管理员权限
-        username = request.headers.get('X-Username')
-        if not username:
-            return error_response("未提供用户信息", 401)
-        
-        # 验证管理员权限
-        current_user = user_service.get_user_info(username)
-        if not current_user['success'] or current_user['data']['usertype'] != 'admin':
-            return error_response("权限不足", 403)
-        
-        data = request.get_json()
-        if not data:
-            return error_response("请求数据不能为空", 400)
-        
-        pile_id = data.get('pileId', '').strip()
-        
-        if not pile_id:
-            return error_response("充电桩ID不能为空", 400)
-        
-        # 将数字ID转换为字符串ID (如果需要)
-        if pile_id.isdigit():
-            pile_char_id = chr(ord('A') + int(pile_id) - 1)
-        else:
-            pile_char_id = pile_id.upper()
-        
-        # 处理恢复
-        result = charging_fault_service.handle_pile_recovery(pile_char_id)
-        
-        if result["success"]:
-            return success_response(result["message"], {
-                "pileId": pile_char_id,
-                "rescheduledCars": result["rescheduled_cars"],
-                "timestamp": datetime.now().isoformat()
-            })
-        else:
-            return error_response(result["message"], 400)
-    
-    except Exception as e:
-        logger.error(f"处理恢复时发生错误: {str(e)}")
-        return error_response("处理恢复失败", 500)
-
-@app.route('/api/admin/fault/status', methods=['GET'])
-def get_fault_status():
-    """获取故障状态信息"""
-    try:
-        # 检查管理员权限
-        username = request.headers.get('X-Username')
-        if not username:
-            return error_response("未提供用户信息", 401)
-        
-        # 验证管理员权限
-        current_user = user_service.get_user_info(username)
-        if not current_user['success'] or current_user['data']['usertype'] != 'admin':
-            return error_response("权限不足", 403)
-        
-        fault_status = charging_fault_service.get_fault_status()
-        return success_response("获取故障状态成功", fault_status)
-    
-    except Exception as e:
-        logger.error(f"获取故障状态时发生错误: {str(e)}")
-        return error_response("获取故障状态失败", 500)
-
-@app.route('/api/admin/fault/statistics', methods=['GET'])
-def get_fault_statistics():
-    """获取故障统计信息"""
-    try:
-        # 检查管理员权限
-        username = request.headers.get('X-Username')
-        if not username:
-            return error_response("未提供用户信息", 401)
-        
-        # 验证管理员权限
-        current_user = user_service.get_user_info(username)
-        if not current_user['success'] or current_user['data']['usertype'] != 'admin':
-            return error_response("权限不足", 403)
-        
-        fault_statistics = charging_fault_service.get_fault_statistics()
-        return success_response("获取故障统计成功", fault_statistics)
-    
-    except Exception as e:
-        logger.error(f"获取故障统计时发生错误: {str(e)}")
-        return error_response("获取故障统计失败", 500)
-
-@app.route('/api/admin/fault/dispatch-mode', methods=['POST'])
-def set_fault_dispatch_mode():
-    """设置故障调度模式"""
-    try:
-        # 检查管理员权限
-        username = request.headers.get('X-Username')
-        if not username:
-            return error_response("未提供用户信息", 401)
-        
-        # 验证管理员权限
-        current_user = user_service.get_user_info(username)
-        if not current_user['success'] or current_user['data']['usertype'] != 'admin':
-            return error_response("权限不足", 403)
-        
-        data = request.get_json()
-        if not data:
-            return error_response("请求数据不能为空", 400)
-        
-        mode = data.get('mode', '').strip().lower()
-        
-        if mode not in ['priority', 'time_order']:
-            return error_response("无效的调度模式", 400)
-        
-        # 设置调度模式
-        dispatch_mode = DispatchMode.PRIORITY if mode == 'priority' else DispatchMode.TIME_ORDER
-        charging_fault_service.set_dispatch_mode(dispatch_mode)
-        
-        return success_response("设置调度模式成功", {
-            "mode": mode,
-            "description": "优先级调度" if mode == 'priority' else "时间顺序调度",
-            "timestamp": datetime.now().isoformat()
-        })
-    
-    except Exception as e:
-        logger.error(f"设置调度模式时发生错误: {str(e)}")
-        return error_response("设置调度模式失败", 500)
-
-@app.route('/api/admin/fault/dispatch-mode', methods=['GET'])
-def get_fault_dispatch_mode():
-    """获取当前故障调度模式"""
-    try:
-        # 检查管理员权限
-        username = request.headers.get('X-Username')
-        if not username:
-            return error_response("未提供用户信息", 401)
-        
-        # 验证管理员权限
-        current_user = user_service.get_user_info(username)
-        if not current_user['success'] or current_user['data']['usertype'] != 'admin':
-            return error_response("权限不足", 403)
-        
-        current_mode = charging_fault_service.dispatch_mode
-        
-        return success_response("获取调度模式成功", {
-            "mode": current_mode.value,
-            "description": "优先级调度" if current_mode == DispatchMode.PRIORITY else "时间顺序调度"
-        })
-    
-    except Exception as e:
-        logger.error(f"获取调度模式时发生错误: {str(e)}")
-        return error_response("获取调度模式失败", 500)
 
 if __name__ == '__main__':
     logger.info("启动智能充电桩调度计费系统...")
