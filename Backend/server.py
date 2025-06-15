@@ -260,10 +260,11 @@ def get_user_statistics():
             total_cost = 0.0
             
             for session in sessions:
-                if session.status.value == "COMPLETED":
-                    total_energy += session.actual_amount or 0
+                # 统计所有有充电量的记录（包括完成、中断等状态）
+                if session.status.value in ["COMPLETED", "INTERRUPTED"] and session.current_amount > 0:
+                    total_energy += session.current_amount or 0
                     # 计算费用 (简化计算: 电费 + 服务费)
-                    amount = session.actual_amount or 0
+                    amount = session.current_amount or 0
                     session_cost = amount * 1.5  # 假设平均费用1.5元/度
                     total_cost += session_cost
             
@@ -1161,6 +1162,132 @@ def get_charging_monitor_status():
     except Exception as e:
         logger.error(f"获取监控状态时发生错误: {str(e)}")
         return error_response("获取监控状态失败", 500)
+
+@app.route('/api/charging/records', methods=['GET'])
+def get_charging_records():
+    """获取用户充电记录"""
+    try:
+        # 从请求头获取用户名
+        username = request.headers.get('X-Username')
+        if not username:
+            return error_response("未提供用户信息", 401)
+        
+        # 获取查询参数
+        start_date = request.args.get('startDate', '')
+        end_date = request.args.get('endDate', '')
+        pile_id = request.args.get('pileId', '')
+        sort_by = request.args.get('sortBy', 'time_desc')
+        page = int(request.args.get('page', 1))
+        page_size = int(request.args.get('pageSize', 10))
+        
+        # 获取用户的充电历史记录
+        all_sessions = charging_process_service.get_user_session_history(username, 1000)
+        
+        # 过滤记录
+        filtered_sessions = []
+        for session in all_sessions:
+            # 日期过滤
+            session_date = session.start_time.strftime('%Y-%m-%d') if session.start_time else ''
+            if start_date and session_date < start_date:
+                continue
+            if end_date and session_date > end_date:
+                continue
+            
+            # 充电桩过滤
+            if pile_id and session.pile_id != pile_id:
+                continue
+            
+            filtered_sessions.append(session)
+        
+        # 排序
+        if sort_by == 'time_desc':
+            filtered_sessions.sort(key=lambda x: x.start_time or datetime.now(), reverse=True)
+        elif sort_by == 'time_asc':
+            filtered_sessions.sort(key=lambda x: x.start_time or datetime.now())
+        elif sort_by == 'cost_desc':
+            filtered_sessions.sort(key=lambda x: (x.current_amount or 0) * 1.5, reverse=True)
+        elif sort_by == 'cost_asc':
+            filtered_sessions.sort(key=lambda x: (x.current_amount or 0) * 1.5)
+        
+        # 分页
+        total_count = len(filtered_sessions)
+        start_idx = (page - 1) * page_size
+        end_idx = start_idx + page_size
+        page_sessions = filtered_sessions[start_idx:end_idx]
+        
+        # 格式化记录
+        records = []
+        total_energy = 0.0
+        total_cost = 0.0
+        
+        for session in page_sessions:
+            # 计算充电时长
+            duration = ""
+            if session.start_time and session.end_time:
+                delta = session.end_time - session.start_time
+                hours = delta.seconds // 3600
+                minutes = (delta.seconds % 3600) // 60
+                duration = f"{hours}小时{minutes}分钟"
+            elif session.start_time:
+                delta = datetime.now() - session.start_time
+                hours = delta.seconds // 3600
+                minutes = (delta.seconds % 3600) // 60
+                duration = f"{hours}小时{minutes}分钟"
+            
+            # 计算费用 (简化计算)
+            current_amount = session.current_amount or 0
+            charge_cost = current_amount * 0.7  # 电费 0.7元/度
+            service_cost = current_amount * 0.8  # 服务费 0.8元/度
+            record_total_cost = charge_cost + service_cost
+            
+            # 状态映射
+            status_map = {
+                'COMPLETED': 'COMPLETED',
+                'CHARGING': 'COMPLETED',  # 充电中视为进行中，但记录中通常为已完成
+                'CANCELLED': 'CANCELLED',
+                'INTERRUPTED': 'INTERRUPTED'
+            }
+            
+            # 获取充电桩名称
+            pile_name = f"{session.pile_id}号充电桩"
+            pile = charging_pile_service.get_pile(session.pile_id)
+            if pile:
+                pile_name = pile.name
+            
+            record = {
+                "recordId": session.session_id,
+                "pileId": session.pile_id,
+                "pileName": pile_name,
+                "energyAmount": round(current_amount, 2),  # 充电量
+                "startTime": session.start_time.isoformat() if session.start_time else "",
+                "endTime": session.end_time.isoformat() if session.end_time else "",
+                "duration": duration,
+                "chargeCost": round(charge_cost, 2),
+                "serviceCost": round(service_cost, 2),
+                "totalCost": round(record_total_cost, 2),
+                "status": status_map.get(session.status.value, 'COMPLETED')
+            }
+            
+            records.append(record)
+            
+            # 统计总计
+            if session.status.value == 'COMPLETED':
+                total_energy += current_amount
+                total_cost += record_total_cost
+        
+        # 返回数据
+        response_data = {
+            "records": records,
+            "totalCount": total_count,
+            "totalEnergy": round(total_energy, 1),
+            "totalCost": round(total_cost, 2)
+        }
+        
+        return success_response("获取充电记录成功", response_data)
+        
+    except Exception as e:
+        logger.error(f"获取充电记录时发生错误: {str(e)}")
+        return error_response("获取充电记录失败", 500)
 
 if __name__ == '__main__':
     logger.info("启动智能充电桩调度计费系统...")

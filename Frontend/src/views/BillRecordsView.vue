@@ -55,21 +55,6 @@
     </div>
 
     <div v-else class="records-section">
-      <div class="summary-card">
-        <div class="summary-item">
-          <div class="summary-label">总充电次数</div>
-          <div class="summary-value">{{ summary.totalCount }}</div>
-        </div>
-        <div class="summary-item">
-          <div class="summary-label">总充电量</div>
-          <div class="summary-value">{{ summary.totalAmount }} 度</div>
-        </div>
-        <div class="summary-item">
-          <div class="summary-label">总费用</div>
-          <div class="summary-value">{{ summary.totalCost }} 元</div>
-        </div>
-      </div>
-
       <div v-for="record in records" :key="record.recordId" class="record-card">
         <div class="record-header">
           <div class="record-id">详单编号: {{ record.recordId }}</div>
@@ -170,12 +155,7 @@ const currentPage = ref(1)
 const totalPages = ref(1)
 const pageSize = 10
 
-// 统计数据
-const summary = ref({
-  totalCount: 0,
-  totalAmount: 0,
-  totalCost: 0,
-})
+
 
 // 详单记录
 interface BillRecord {
@@ -250,6 +230,7 @@ const fetchRecords = async () => {
     }
     
     const user = JSON.parse(userJson)
+    console.log('充电记录页面请求用户名:', user.username)
     const { startDate, endDate } = getDateRange()
     
     const response = await axios.get(`${API_BASE_URL}/api/charging/records`, {
@@ -268,12 +249,8 @@ const fetchRecords = async () => {
 
     if (response.data.code === 200) {
       const data = response.data.data
+      console.log('充电记录页面获取的数据:', data)
       records.value = data.records
-      summary.value = {
-        totalCount: data.totalCount,
-        totalAmount: data.totalEnergy,
-        totalCost: data.totalCost
-      }
       totalPages.value = Math.ceil(data.totalCount / pageSize)
     } else {
       throw new Error(response.data.message)
@@ -479,31 +456,7 @@ onMounted(() => {
   margin-bottom: 0;
 }
 
-.summary-card {
-  background-color: #f8f9fa;
-  border-radius: 10px;
-  padding: 20px;
-  display: flex;
-  justify-content: space-around;
-  margin-bottom: 20px;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
-}
 
-.summary-item {
-  text-align: center;
-}
-
-.summary-label {
-  font-size: 14px;
-  color: var(--light-text);
-  margin-bottom: 5px;
-}
-
-.summary-value {
-  font-size: 24px;
-  font-weight: 600;
-  color: var(--text-color);
-}
 
 .record-card {
   background-color: white;
@@ -664,12 +617,6 @@ onMounted(() => {
   .record-body {
     flex-direction: column;
     gap: 15px;
-  }
-  
-  .summary-card {
-    flex-direction: column;
-    gap: 15px;
-    align-items: center;
   }
   
   .record-footer {

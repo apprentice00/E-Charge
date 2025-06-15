@@ -6,6 +6,10 @@
         <div class="greeting">欢迎回来，<span class="user-highlight">{{ username }}</span></div>
       </div>
       <div class="user-info">
+        <button class="refresh-btn" @click="refreshData" :disabled="isLoading">
+          <span class="refresh-icon">🔄</span>
+          刷新数据
+        </button>
         <div class="user-avatar">{{ username.charAt(0).toUpperCase() }}</div>
         <button class="logout-btn" @click="logout">
           <span class="logout-icon"></span>
@@ -153,6 +157,7 @@ const fetchUserStats = async () => {
     }
     
     const user = JSON.parse(userJson)
+    console.log('请求统计数据的用户名:', user.username)
     const response = await axios.get(`${API_BASE_URL}/api/user/statistics`, {
       headers: {
         'X-Username': user.username
@@ -161,9 +166,15 @@ const fetchUserStats = async () => {
 
     if (response.data.code === 200) {
       const stats = response.data.data
+      console.log('获取到的统计数据:', stats)
       chargeCount.value = stats.chargeCount
       totalEnergy.value = stats.totalEnergy
       totalCost.value = stats.totalCost.toFixed(2)
+      console.log('更新后的数据:', {
+        chargeCount: chargeCount.value,
+        totalEnergy: totalEnergy.value,
+        totalCost: totalCost.value
+      })
     } else {
       throw new Error(response.data.message)
     }
@@ -229,6 +240,11 @@ const fetchDashboardData = async () => {
   } finally {
     isLoading.value = false
   }
+}
+
+// 刷新数据
+const refreshData = async () => {
+  await fetchDashboardData()
 }
 
 onMounted(async () => {
@@ -348,6 +364,39 @@ html, body {
   align-items: center;
   font-size: 1.2rem;
   font-weight: 500;
+}
+
+.refresh-btn {
+  background-color: var(--primary-color);
+  border: 1px solid var(--primary-color);
+  color: white;
+  padding: 0.5rem 1rem;
+  border-radius: 0.5rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all var(--transition-time);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.refresh-btn:hover:not(:disabled) {
+  background-color: var(--primary-dark);
+  border-color: var(--primary-dark);
+}
+
+.refresh-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.refresh-icon {
+  font-size: 1rem;
+  transition: transform 0.5s;
+}
+
+.refresh-btn:not(:disabled):hover .refresh-icon {
+  transform: rotate(180deg);
 }
 
 .logout-btn {
