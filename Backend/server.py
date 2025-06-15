@@ -3,6 +3,7 @@ from flask_cors import CORS
 from services.user_service import UserService
 from services.charging_pile_service import charging_pile_service
 from services.queue_service import queue_service
+from services.dispatch_service import dispatch_service
 from database.database_manager import DatabaseManager
 from utils.response_helper import success_response, error_response
 from datetime import datetime
@@ -38,18 +39,29 @@ def init_services():
             # 初始化用户服务（从数据库加载数据）
             user_service = UserService(db_manager)
             
+            # 启动调度引擎
+            dispatch_service.start_dispatch_engine()
+            
             logger.info("所有服务初始化成功")
             return True
         else:
             logger.error("数据库连接失败，使用内存模式")
             # 如果数据库连接失败，使用纯内存模式
             user_service = UserService()
+            
+            # 启动调度引擎
+            dispatch_service.start_dispatch_engine()
+            
             return False
             
     except Exception as e:
         logger.error(f"服务初始化失败: {e}")
         # 如果初始化失败，使用内存模式
         user_service = UserService()
+        
+        # 启动调度引擎
+        dispatch_service.start_dispatch_engine()
+        
         return False
 
 # 标记是否已经关闭
@@ -67,6 +79,11 @@ def shutdown_services():
     try:
         # 注意：不再执行全量保存，因为用户数据已经实时同步到数据库
         # 全量保存会覆盖数据库中的数据，可能导致数据丢失
+        logger.info("正在关闭服务...")
+        
+        # 停止调度引擎
+        dispatch_service.stop_dispatch_engine()
+        
         logger.info("正在关闭数据库连接...")
         
         if db_manager:
@@ -646,7 +663,133 @@ def get_queue_ahead_count():
         logger.error(f"获取前车等待数量时发生错误: {str(e)}")
         return error_response("获取前车等待数量失败", 500)
 
+# ==================== 调度系统API ====================
 
+@app.route('/api/dispatch/statistics', methods=['GET'])
+def get_dispatch_statistics():
+    """获取调度统计信息"""
+    try:
+        dispatch_stats = dispatch_service.get_dispatch_statistics()
+        return success_response("获取调度统计成功", dispatch_stats)
+    
+    except Exception as e:
+        logger.error(f"获取调度统计时发生错误: {str(e)}")
+        return error_response("获取调度统计失败", 500)
+
+@app.route('/api/dispatch/pile-queues', methods=['GET'])
+def get_pile_queues():
+    """获取所有充电桩队列状态"""
+    try:
+        pile_queues = dispatch_service.get_all_pile_queues_status()
+        return success_response("获取充电桩队列状态成功", pile_queues)
+    
+    except Exception as e:
+        logger.error(f"获取充电桩队列状态时发生错误: {str(e)}")
+        return error_response("获取充电桩队列状态失败", 500)
+
+@app.route('/api/dispatch/pile-queue/<string:pile_id>', methods=['GET'])
+def get_pile_queue(pile_id):
+    """获取指定充电桩队列状态"""
+    try:
+        pile_queue = dispatch_service.get_pile_queue_status(pile_id)
+        
+        if pile_queue:
+            return success_response("获取充电桩队列状态成功", pile_queue)
+        else:
+            return error_response("充电桩不存在", 404)
+    
+    except Exception as e:
+        logger.error(f"获取充电桩队列状态时发生错误: {str(e)}")
+        return error_response("获取充电桩队列状态失败", 500)
+
+@app.route('/api/dispatch/engine/start', methods=['POST'])
+def start_dispatch_engine():
+    """启动调度引擎"""
+    try:
+        dispatch_service.start_dispatch_engine()
+        return success_response("调度引擎已启动")
+    
+    except Exception as e:
+        logger.error(f"启动调度引擎时发生错误: {str(e)}")
+        return error_response("启动调度引擎失败", 500)
+
+@app.route('/api/dispatch/engine/stop', methods=['POST'])
+def stop_dispatch_engine():
+    """停止调度引擎"""
+    try:
+        dispatch_service.stop_dispatch_engine()
+        return success_response("调度引擎已停止")
+    
+    except Exception as e:
+        logger.error(f"停止调度引擎时发生错误: {str(e)}")
+        return error_response("停止调度引擎失败", 500)
+
+@app.route('/api/dispatch/engine/status', methods=['GET'])
+def get_dispatch_engine_status():
+    """获取调度引擎状态"""
+    try:
+        stats = dispatch_service.get_dispatch_statistics()
+        engine_status = {
+            "isRunning": stats["engineRunning"],
+            "totalDispatched": stats["totalDispatched"],
+            "pileUtilization": stats["pileUtilization"],
+            "recentDecisions": stats["recentDecisions"][-5:]  # 最近5个决策
+        }
+        
+        return success_response("获取调度引擎状态成功", engine_status)
+    
+    except Exception as e:
+        logger.error(f"获取调度引擎状态时发生错误: {str(e)}")
+        return error_response("获取调度引擎状态失败", 500)
+
+@app.route('/api/admin/dispatch/overview', methods=['GET'])
+def get_admin_dispatch_overview():
+    """获取管理员调度概览"""
+    try:
+        # 获取调度统计
+        dispatch_stats = dispatch_service.get_dispatch_statistics()
+        
+        # 获取充电桩队列信息
+        pile_queues = dispatch_service.get_all_pile_queues_status()
+        
+        # 格式化充电桩队列信息
+        formatted_queues = []
+        for pile_id, queue_info in pile_queues.items():
+            pile_name = f"{'快充桩' if queue_info['pileType'] == 'fast' else '慢充桩'} {pile_id}"
+            
+            queue_data = {
+                "pileId": pile_id,
+                "pileName": pile_name,
+                "pileType": queue_info["pileType"],
+                "power": queue_info["power"],
+                "capacity": queue_info["capacity"],
+                "occupied": queue_info["capacity"] - queue_info["availableCapacity"],
+                "utilization": f"{((queue_info['capacity'] - queue_info['availableCapacity']) / queue_info['capacity'] * 100):.1f}%",
+                "chargingCar": queue_info.get("chargingCar"),
+                "waitingCar": queue_info.get("waitingCar"),
+                "totalDispatched": queue_info["totalDispatched"]
+            }
+            formatted_queues.append(queue_data)
+        
+        # 排序：快充桩在前，慢充桩在后
+        formatted_queues.sort(key=lambda x: (x["pileType"] == "slow", x["pileId"]))
+        
+        overview = {
+            "engineStatus": {
+                "isRunning": dispatch_stats["engineRunning"],
+                "totalDispatched": dispatch_stats["totalDispatched"]
+            },
+            "pileQueues": formatted_queues,
+            "utilizationSummary": dispatch_stats["pileUtilization"],
+            "queueCapacity": dispatch_stats["queueCapacity"],
+            "recentDecisions": dispatch_stats["recentDecisions"][-10:]  # 最近10个决策
+        }
+        
+        return success_response("获取调度概览成功", overview)
+    
+    except Exception as e:
+        logger.error(f"获取调度概览时发生错误: {str(e)}")
+        return error_response("获取调度概览失败", 500)
 
 if __name__ == '__main__':
     logger.info("启动智能充电桩调度计费系统...")
