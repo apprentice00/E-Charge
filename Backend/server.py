@@ -4,6 +4,7 @@ from services.user_service import UserService
 from services.charging_pile_service import charging_pile_service
 from services.queue_service import queue_service
 from services.dispatch_service import dispatch_service
+from services.charging_process_service import charging_process_service
 from database.database_manager import DatabaseManager
 from utils.response_helper import success_response, error_response
 from datetime import datetime
@@ -42,6 +43,9 @@ def init_services():
             # 启动调度引擎
             dispatch_service.start_dispatch_engine()
             
+            # 启动充电过程监控
+            charging_process_service.start_progress_monitor()
+            
             logger.info("所有服务初始化成功")
             return True
         else:
@@ -52,6 +56,9 @@ def init_services():
             # 启动调度引擎
             dispatch_service.start_dispatch_engine()
             
+            # 启动充电过程监控
+            charging_process_service.start_progress_monitor()
+            
             return False
             
     except Exception as e:
@@ -61,6 +68,9 @@ def init_services():
         
         # 启动调度引擎
         dispatch_service.start_dispatch_engine()
+        
+        # 启动充电过程监控
+        charging_process_service.start_progress_monitor()
         
         return False
 
@@ -83,6 +93,9 @@ def shutdown_services():
         
         # 停止调度引擎
         dispatch_service.stop_dispatch_engine()
+        
+        # 停止充电过程监控
+        charging_process_service.stop_progress_monitor()
         
         logger.info("正在关闭数据库连接...")
         
@@ -512,6 +525,68 @@ def test_pile_info():
 
 # ==================== 排队管理API ====================
 
+@app.route('/api/charging/current', methods=['GET'])
+def get_current_charging_status():
+    """获取用户当前充电状态"""
+    try:
+        username = request.headers.get('X-Username')
+        if not username:
+            return error_response("未提供用户信息", 401)
+        
+        # 首先检查用户是否有活跃的充电会话
+        session = charging_process_service.get_user_active_session(username)
+        
+        if session:
+            # 用户有活跃的充电会话，同时获取队列状态信息
+            queue_status = queue_service.get_queue_status(username)
+            
+            if queue_status:
+                return success_response("获取充电状态成功", {
+                    "hasActiveCharging": True,
+                    "status": "charging",
+                    "queue": queue_status
+                })
+            else:
+                # 如果无法获取队列状态，返回会话信息
+                session_data = session.to_dict()
+                session_data["remainingTime"] = session.get_remaining_time() or 0
+                session_data["chargingSpeed"] = session.get_charging_speed()
+                
+                return success_response("获取充电状态成功", {
+                    "hasActiveCharging": True,
+                    "status": "charging",
+                    "session": session_data
+                })
+        
+        # 如果没有活跃充电会话，检查是否有排队请求
+        queue_status = queue_service.get_queue_status(username)
+        
+        if queue_status:
+            if queue_status.get('status') == 'CHARGING':
+                # 用户正在充电（在调度系统中）
+                return success_response("获取充电状态成功", {
+                    "hasActiveCharging": True,
+                    "status": "charging",
+                    "queue": queue_status
+                })
+            elif queue_status.get('status') == 'WAITING':
+                # 用户在排队等待
+                return success_response("获取充电状态成功", {
+                    "hasActiveCharging": False,
+                    "status": "waiting",
+                    "queue": queue_status
+                })
+        
+        # 用户没有任何充电相关活动
+        return success_response("获取充电状态成功", {
+            "hasActiveCharging": False,
+            "status": "idle"
+        })
+    
+    except Exception as e:
+        logger.error(f"获取当前充电状态时发生错误: {str(e)}")
+        return error_response("获取充电状态失败", 500)
+
 @app.route('/api/charging/request', methods=['POST'])
 def submit_charge_request():
     """提交充电请求"""
@@ -790,6 +865,250 @@ def get_admin_dispatch_overview():
     except Exception as e:
         logger.error(f"获取调度概览时发生错误: {str(e)}")
         return error_response("获取调度概览失败", 500)
+
+# ==================== 充电过程管理API ====================
+
+@app.route('/api/charging/session/status', methods=['GET'])
+def get_charging_session_status():
+    """获取用户当前充电会话状态"""
+    try:
+        username = request.headers.get('X-Username')
+        if not username:
+            return error_response("未提供用户信息", 401)
+        
+        # 获取用户活跃充电会话
+        session = charging_process_service.get_user_active_session(username)
+        
+        if session:
+            session_data = session.to_dict()
+            return success_response("获取充电会话状态成功", session_data)
+        else:
+            return success_response("无活跃充电会话", {"hasActiveCharging": False})
+    
+    except Exception as e:
+        logger.error(f"获取充电会话状态时发生错误: {str(e)}")
+        return error_response("获取充电会话状态失败", 500)
+
+@app.route('/api/charging/session/history', methods=['GET'])
+def get_charging_session_history():
+    """获取用户充电会话历史"""
+    try:
+        username = request.headers.get('X-Username')
+        if not username:
+            return error_response("未提供用户信息", 401)
+        
+        limit = int(request.args.get('limit', 10))
+        
+        # 获取用户充电历史
+        sessions = charging_process_service.get_user_session_history(username, limit)
+        
+        sessions_data = []
+        for session in sessions:
+            session_data = session.to_dict()
+            
+            # 获取对应的详单信息
+            bill = charging_process_service.get_session_bill(session.session_id)
+            if bill:
+                session_data["bill"] = bill.to_dict()
+            
+            sessions_data.append(session_data)
+        
+        return success_response("获取充电历史成功", {
+            "sessions": sessions_data,
+            "totalCount": len(sessions_data)
+        })
+    
+    except Exception as e:
+        logger.error(f"获取充电历史时发生错误: {str(e)}")
+        return error_response("获取充电历史失败", 500)
+
+@app.route('/api/charging/session/<string:session_id>/stop', methods=['POST'])
+def stop_charging_session_api(session_id):
+    """停止充电会话"""
+    try:
+        username = request.headers.get('X-Username')
+        if not username:
+            return error_response("未提供用户信息", 401)
+        
+        data = request.get_json() or {}
+        reason = data.get('reason', '用户主动停止')
+        
+        # 验证会话所有权
+        session = charging_process_service.get_session_by_id(session_id)
+        if not session or session.user_id != username:
+            return error_response("无权操作此充电会话", 403)
+        
+        # 停止充电会话
+        success = charging_process_service.stop_charging_session(session_id, reason)
+        
+        if success:
+            # 获取生成的详单
+            bill = charging_process_service.get_session_bill(session_id)
+            bill_data = bill.to_dict() if bill else None
+            
+            return success_response("充电会话已停止", {
+                "sessionId": session_id,
+                "stopTime": datetime.now().isoformat(),
+                "bill": bill_data
+            })
+        else:
+            return error_response("停止充电会话失败", 400)
+    
+    except Exception as e:
+        logger.error(f"停止充电会话时发生错误: {str(e)}")
+        return error_response("停止充电会话失败", 500)
+
+@app.route('/api/charging/session/<string:session_id>/bill', methods=['GET'])
+def get_charging_session_bill(session_id):
+    """获取充电会话详单"""
+    try:
+        username = request.headers.get('X-Username')
+        if not username:
+            return error_response("未提供用户信息", 401)
+        
+        # 验证会话所有权
+        session = charging_process_service.get_session_by_id(session_id)
+        if not session or session.user_id != username:
+            return error_response("无权查看此充电详单", 403)
+        
+        # 获取详单
+        bill = charging_process_service.get_session_bill(session_id)
+        
+        if bill:
+            return success_response("获取充电详单成功", bill.to_dict())
+        else:
+            return error_response("充电详单未生成", 404)
+    
+    except Exception as e:
+        logger.error(f"获取充电详单时发生错误: {str(e)}")
+        return error_response("获取充电详单失败", 500)
+
+@app.route('/api/charging/real-time-status', methods=['GET'])
+def get_real_time_charging_status():
+    """获取实时充电状态"""
+    try:
+        username = request.headers.get('X-Username')
+        if not username:
+            return error_response("未提供用户信息", 401)
+        
+        # 获取用户的实时充电状态
+        session = charging_process_service.get_user_active_session(username)
+        
+        if session:
+            session_data = session.to_dict()
+            session_data["remainingTime"] = session.get_remaining_time() or 0
+            session_data["chargingSpeed"] = session.get_charging_speed()
+            
+            return success_response("获取实时状态成功", {
+                "hasActiveCharging": True,
+                "session": session_data
+            })
+        else:
+            return success_response("无活跃充电", {"hasActiveCharging": False})
+    
+    except Exception as e:
+        logger.error(f"获取实时充电状态时发生错误: {str(e)}")
+        return error_response("获取实时充电状态失败", 500)
+
+@app.route('/api/admin/charging/sessions', methods=['GET'])
+def get_admin_charging_sessions():
+    """获取所有充电会话（管理员）"""
+    try:
+        # 检查管理员权限
+        username = request.headers.get('X-Username')
+        if not username:
+            return error_response("未提供用户信息", 401)
+        
+        # 验证管理员权限
+        current_user = user_service.get_user_info(username)
+        if not current_user['success'] or current_user['data']['usertype'] != 'admin':
+            return error_response("权限不足", 403)
+        
+        # 获取所有活跃充电会话
+        active_sessions = charging_process_service.get_all_active_sessions()
+        
+        sessions_data = []
+        for session in active_sessions:
+            session_data = session.to_dict()
+            session_data["remainingTime"] = session.get_remaining_time() or 0
+            session_data["chargingSpeed"] = session.get_charging_speed()
+            sessions_data.append(session_data)
+        
+        return success_response("获取充电会话列表成功", {
+            "sessions": sessions_data,
+            "totalCount": len(sessions_data)
+        })
+    
+    except Exception as e:
+        logger.error(f"获取充电会话列表时发生错误: {str(e)}")
+        return error_response("获取充电会话列表失败", 500)
+
+@app.route('/api/admin/charging/statistics', methods=['GET'])
+def get_admin_charging_statistics():
+    """获取充电统计信息（管理员）"""
+    try:
+        # 检查管理员权限
+        username = request.headers.get('X-Username')
+        if not username:
+            return error_response("未提供用户信息", 401)
+        
+        # 验证管理员权限
+        current_user = user_service.get_user_info(username)
+        if not current_user['success'] or current_user['data']['usertype'] != 'admin':
+            return error_response("权限不足", 403)
+        
+        # 获取充电统计信息
+        stats = charging_process_service.get_charging_statistics()
+        
+        return success_response("获取充电统计成功", stats)
+    
+    except Exception as e:
+        logger.error(f"获取充电统计时发生错误: {str(e)}")
+        return error_response("获取充电统计失败", 500)
+
+@app.route('/api/admin/charging/session/<string:session_id>/stop', methods=['POST'])
+def admin_stop_charging_session(session_id):
+    """管理员强制停止充电会话"""
+    try:
+        # 检查管理员权限
+        username = request.headers.get('X-Username')
+        if not username:
+            return error_response("未提供用户信息", 401)
+        
+        # 验证管理员权限
+        current_user = user_service.get_user_info(username)
+        if not current_user['success'] or current_user['data']['usertype'] != 'admin':
+            return error_response("权限不足", 403)
+        
+        data = request.get_json() or {}
+        reason = data.get('reason', '管理员强制停止')
+        
+        # 停止充电会话
+        success = charging_process_service.stop_charging_session(session_id, reason)
+        
+        if success:
+            return success_response("充电会话已强制停止", {
+                "sessionId": session_id,
+                "stopTime": datetime.now().isoformat(),
+                "reason": reason
+            })
+        else:
+            return error_response("停止充电会话失败", 400)
+    
+    except Exception as e:
+        logger.error(f"管理员停止充电会话时发生错误: {str(e)}")
+        return error_response("停止充电会话失败", 500)
+
+@app.route('/api/charging/process/monitor/status', methods=['GET'])
+def get_charging_monitor_status():
+    """获取充电进度监控状态"""
+    try:
+        real_time_status = charging_process_service.get_real_time_status()
+        return success_response("获取监控状态成功", real_time_status)
+    
+    except Exception as e:
+        logger.error(f"获取监控状态时发生错误: {str(e)}")
+        return error_response("获取监控状态失败", 500)
 
 if __name__ == '__main__':
     logger.info("启动智能充电桩调度计费系统...")

@@ -73,7 +73,14 @@ class PileDispatchQueue:
             
             # 结束充电会话
             if self.current_session:
-                self.current_session.complete_charging()
+                try:
+                    from services.charging_process_service import charging_process_service
+                    charging_process_service.stop_charging_session(
+                        self.current_session.session_id, "充电完成"
+                    )
+                except Exception as e:
+                    print(f"停止充电会话失败: {e}")
+                
                 self.current_session = None
             
             # 统计信息
@@ -93,18 +100,30 @@ class PileDispatchQueue:
     def _start_charging(self, car: WaitingCar):
         """开始充电"""
         try:
-            # 启动充电桩
-            success = charging_pile_service.start_charging(self.pile_id, car.user_id, car.requested_amount)
-            if success:
-                # 创建充电会话
-                session_id = ChargingSession.generate_session_id(car.user_id, self.pile_id)
-                self.current_session = ChargingSession(
-                    session_id, car.user_id, self.pile_id, car.requested_amount, self.power
-                )
-                self.current_session.start_charging()
-                print(f"充电桩 {self.pile_id} 开始为用户 {car.user_id} 充电")
+            from services.charging_process_service import charging_process_service
+            
+            # 检查用户是否已有活跃充电会话
+            existing_session = charging_process_service.get_user_active_session(car.user_id)
+            if existing_session:
+                print(f"用户 {car.user_id} 已有活跃充电会话: {existing_session.session_id}")
+                self.current_session = existing_session
+                return
+            
+            # 创建充电会话
+            session = charging_process_service.create_charging_session(
+                car.user_id, self.pile_id, car.requested_amount
+            )
+            
+            if session:
+                # 启动充电会话
+                success = charging_process_service.start_charging_session(session.session_id)
+                if success:
+                    self.current_session = session
+                    print(f"充电桩 {self.pile_id} 开始为用户 {car.user_id} 充电")
+                else:
+                    print(f"启动充电会话失败: {session.session_id}")
             else:
-                print(f"充电桩 {self.pile_id} 启动充电失败")
+                print(f"创建充电会话失败：用户 {car.user_id}, 充电桩 {self.pile_id}")
         except Exception as e:
             print(f"启动充电时发生错误: {e}")
     
@@ -224,6 +243,10 @@ class DispatchService:
         for car in waiting_cars:
             if not available_piles:
                 break
+                
+            # 检查用户是否已经在调度系统中（防止重复调度）
+            if self._is_user_already_dispatched(car.user_id):
+                continue
             
             # 选择最优充电桩
             best_pile_id = self._select_optimal_pile(car, available_piles)
@@ -235,6 +258,19 @@ class DispatchService:
                     if not self.pile_queues[best_pile_id].has_space():
                         # 如果充电桩已满，从可用列表中移除
                         pass
+                    # 调度成功后，只调度一个车辆就退出，避免重复调度
+                    break
+    
+    def _is_user_already_dispatched(self, user_id: str) -> bool:
+        """检查用户是否已经在调度系统中"""
+        for pile_queue in self.pile_queues.values():
+            # 检查是否正在充电
+            if pile_queue.charging_car and pile_queue.charging_car.user_id == user_id:
+                return True
+            # 检查是否在队列等待
+            if pile_queue.waiting_car and pile_queue.waiting_car.user_id == user_id:
+                return True
+        return False
     
     def _get_waiting_cars_by_mode(self, charge_mode: str) -> List[WaitingCar]:
         """获取等候区指定模式的车辆（按先来先到排序）"""

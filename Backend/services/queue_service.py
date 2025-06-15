@@ -70,8 +70,8 @@ class QueueService:
                 # 保存活跃请求
                 self.active_requests[user_id] = request
                 
-                # 尝试立即调度
-                self._try_dispatch_cars()
+                # 不再使用旧的调度逻辑，依赖dispatch_service的实时调度引擎
+                # self._try_dispatch_cars()
                 
                 # 返回请求信息
                 request_info = {
@@ -95,6 +95,40 @@ class QueueService:
                 return None
             
             request = self.active_requests[user_id]
+            
+            # 首先检查用户是否已经在调度系统的充电桩队列中
+            from services.dispatch_service import dispatch_service
+            for pile_id, pile_queue in dispatch_service.pile_queues.items():
+                # 检查是否正在充电
+                if pile_queue.charging_car and pile_queue.charging_car.user_id == user_id:
+                    return {
+                        "requestId": request.request_id,
+                        "chargeType": "快充模式" if request.charge_mode == ChargeMode.FAST else "慢充模式",
+                        "targetAmount": request.requested_amount,
+                        "status": "CHARGING",
+                        "queueNumber": request.queue_number,
+                        "position": 0,
+                        "estimatedWaitTime": 0,
+                        "queuePosition": QueuePosition.CHARGING.value,
+                        "assignedPileId": pile_id,
+                        "aheadCount": 0
+                    }
+                # 检查是否在充电桩队列等待
+                elif pile_queue.waiting_car and pile_queue.waiting_car.user_id == user_id:
+                    return {
+                        "requestId": request.request_id,
+                        "chargeType": "快充模式" if request.charge_mode == ChargeMode.FAST else "慢充模式",
+                        "targetAmount": request.requested_amount,
+                        "status": "WAITING",
+                        "queueNumber": request.queue_number,
+                        "position": 1,  # 在充电桩队列中的第二位
+                        "estimatedWaitTime": self._estimate_wait_time_in_pile_queue(pile_queue),
+                        "queuePosition": QueuePosition.PILE_QUEUE.value,
+                        "assignedPileId": pile_id,
+                        "aheadCount": 1
+                    }
+            
+            # 如果不在调度系统中，检查原始排队系统状态
             user_status = self.queue_manager.get_user_status(user_id)
             
             if not user_status:
@@ -126,6 +160,16 @@ class QueueService:
                 "aheadCount": ahead_count
             }
     
+    def _estimate_wait_time_in_pile_queue(self, pile_queue) -> int:
+        """估算在充电桩队列中的等待时间（分钟）"""
+        if pile_queue.charging_car and pile_queue.current_session:
+            try:
+                remaining_time = pile_queue.current_session.get_remaining_time()
+                return int(remaining_time) if remaining_time else 30  # 默认30分钟
+            except:
+                return 30
+        return 30
+    
     def cancel_request(self, user_id: str, request_id: str) -> Tuple[bool, str]:
         """取消充电请求"""
         with self._lock:
@@ -137,14 +181,63 @@ class QueueService:
             if request.request_id != request_id:
                 return False, "请求ID不匹配"
             
-            # 检查是否可以取消
-            if request.status == RequestStatus.CHARGING:
-                return False, "充电中的请求不能在等候区取消，请使用结束充电功能"
+            # 检查用户是否在调度系统中
+            from services.dispatch_service import dispatch_service
+            user_in_dispatch_system = False
+            user_pile_id = None
             
-            # 从排队管理器中移除
+            for pile_id, pile_queue in dispatch_service.pile_queues.items():
+                # 检查是否正在充电
+                if pile_queue.charging_car and pile_queue.charging_car.user_id == user_id:
+                    user_in_dispatch_system = True
+                    user_pile_id = pile_id
+                    break
+                # 检查是否在充电桩队列等待
+                elif pile_queue.waiting_car and pile_queue.waiting_car.user_id == user_id:
+                    user_in_dispatch_system = True
+                    user_pile_id = pile_id
+                    break
+            
+            # 如果用户在调度系统中，从调度系统移除
+            if user_in_dispatch_system and user_pile_id:
+                pile_queue = dispatch_service.pile_queues[user_pile_id]
+                with pile_queue._lock:
+                    # 检查是否正在充电
+                    if pile_queue.charging_car and pile_queue.charging_car.user_id == user_id:
+                        # 停止充电会话
+                        if pile_queue.current_session:
+                            try:
+                                from services.charging_process_service import charging_process_service
+                                charging_process_service.stop_charging_session(
+                                    pile_queue.current_session.session_id, "用户取消充电"
+                                )
+                                print(f"已停止用户 {user_id} 的充电会话")
+                            except Exception as e:
+                                print(f"停止充电会话失败: {e}")
+                        
+                        # 移除正在充电的车辆
+                        pile_queue.charging_car = None
+                        pile_queue.current_session = None
+                        
+                        # 如果有等待车辆，开始充电
+                        if pile_queue.waiting_car:
+                            pile_queue.charging_car = pile_queue.waiting_car
+                            pile_queue.waiting_car = None
+                            pile_queue.charging_car.queue_position = QueuePosition.CHARGING
+                            pile_queue._start_charging(pile_queue.charging_car)
+                        
+                        print(f"已从充电桩 {user_pile_id} 移除正在充电的用户 {user_id}")
+                    
+                    # 检查是否在队列等待
+                    elif pile_queue.waiting_car and pile_queue.waiting_car.user_id == user_id:
+                        pile_queue.waiting_car = None
+                        print(f"已从充电桩 {user_pile_id} 队列中移除等待用户 {user_id}")
+            
+            # 从原始排队管理器中移除
             success = self.queue_manager.cancel_request(user_id)
             
-            if success:
+            # 无论从原始队列移除是否成功，如果用户在调度系统中被移除了，就算成功
+            if success or user_in_dispatch_system:
                 # 更新请求状态
                 request.cancel_request()
                 

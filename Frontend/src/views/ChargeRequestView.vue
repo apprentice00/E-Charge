@@ -131,28 +131,36 @@ const fetchChargingStatus = async () => {
     })
 
     if (response.data.code === 200) {
-      const status = response.data.data
-      if (status.hasActiveCharging) {
+      const data = response.data.data
+      
+      if (data.status === 'charging') {
+        // 用户正在充电
         requestStatus.value = 'charging'
+        const queueData = data.queue
+        if (queueData) {
+          queueNumber.value = queueData.queueNumber
+          chargeMode.value = queueData.chargeType === '快充模式' ? 'fast' : 'slow'
+          chargeAmount.value = queueData.targetAmount
+          requestId.value = queueData.requestId
+        }
+        isEdit.value = true
+      } else if (data.status === 'waiting') {
+        // 用户在排队等待
+        requestStatus.value = 'waiting'
+        const queueData = data.queue
+        if (queueData) {
+          queueNumber.value = queueData.queueNumber
+          chargeMode.value = queueData.chargeType === '快充模式' ? 'fast' : 'slow'
+          chargeAmount.value = queueData.targetAmount
+          requestId.value = queueData.requestId
+        }
         isEdit.value = true
       } else {
-        // 如果没有正在充电，检查是否有排队请求
-        const queueResponse = await axios.get(`${API_BASE_URL}/api/queue/status`, {
-          headers: {
-            'X-Username': user.username
-          }
-        })
-        
-        if (queueResponse.data.code === 200) {
-          const queueData = queueResponse.data.data
-          if (queueData.status === 'WAITING') {
-            requestStatus.value = 'waiting'
-            queueNumber.value = queueData.queueNumber
-            chargeMode.value = queueData.chargeType === '快充模式' ? 'fast' : 'slow'
-            chargeAmount.value = queueData.targetAmount
-            isEdit.value = true
-          }
-        }
+        // 用户空闲状态，没有充电请求
+        requestStatus.value = null
+        queueNumber.value = null
+        requestId.value = null
+        isEdit.value = false
       }
     }
   } catch (error) {
