@@ -164,6 +164,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import axios from 'axios'
+import { API_BASE_URL } from '../config'
 
 const router = useRouter()
 const loading = ref(true)
@@ -237,34 +239,106 @@ const fetchData = async () => {
   loading.value = true
   
   try {
-    // 模拟 API 请求
-    await new Promise(resolve => setTimeout(resolve, 1000))
+    const userJson = localStorage.getItem('currentUser')
+    if (!userJson) {
+      throw new Error('未找到用户信息')
+    }
     
-    // 模拟数据 - 充电中状态
-    hasChargingData.value = true
-    chargingStatus.value = 'charging'
-    queueNumber.value = 'F3'
-    pileName.value = '快充桩 A'
-    chargeMode.value = 'fast'
-    requestedAmount.value = 20
-    chargedAmount.value = 9
-    startTime.value = '2023-06-16 10:00:00'
-    requestTime.value = '2023-06-16 09:30:00'
-    estimatedDuration.value = '0小时40分钟'
+    const user = JSON.parse(userJson)
+    const response = await axios.get(`${API_BASE_URL}/api/charging/current`, {
+      headers: {
+        'X-Username': user.username
+      }
+    })
+
+    if (response.data.code === 200) {
+      const data = response.data.data
+      
+      if (data.hasActiveCharging && data.status === 'charging') {
+        // 用户正在充电
+        hasChargingData.value = true
+        chargingStatus.value = 'charging'
+        pileName.value = data.activePile
+        chargedAmount.value = data.chargedAmount || 0
+        
+        // 从队列信息获取更多详细信息
+        if (data.queue) {
+          queueNumber.value = data.queue.queueNumber
+          requestedAmount.value = data.queue.targetAmount
+          chargeMode.value = data.queue.chargeType === '快充模式' ? 'fast' : 'slow'
+        }
+        
+        // 格式化时间
+        if (data.startTime) {
+          const startDate = new Date(data.startTime)
+          startTime.value = startDate.toLocaleString('zh-CN')
+          
+          // 计算已用时间
+          const now = new Date()
+          const elapsed = Math.floor((now.getTime() - startDate.getTime()) / 1000 / 60) // 分钟
+          const hours = Math.floor(elapsed / 60)
+          const minutes = elapsed % 60
+          elapsedTime.value = `${hours}小时${minutes}分钟`
+        }
+        
+        // 格式化预计结束时间
+        if (data.estimatedEndTime) {
+          const endDate = new Date(data.estimatedEndTime)
+          estimatedEndTime.value = endDate.toLocaleString('zh-CN')
+        }
+        
+        // 计算预计费用（简化计算）
+        const totalAmount = requestedAmount.value
+        estimatedCost.value = parseFloat((totalAmount * 1.5).toFixed(1)) // 假设平均1.5元/度
+        
+      } else if (data.status === 'waiting') {
+        // 用户在排队等待
+        hasChargingData.value = true
+        chargingStatus.value = 'waiting'
+        
+        if (data.queue) {
+          queueNumber.value = data.queue.queueNumber
+          requestedAmount.value = data.queue.targetAmount
+          chargeMode.value = data.queue.chargeType === '快充模式' ? 'fast' : 'slow'
+          pileName.value = data.queue.assignedPileId ? `${data.queue.chargeType === '快充模式' ? '快充桩' : '慢充桩'} ${data.queue.assignedPileId}` : '等候分配'
+          
+          // 设置请求时间为当前时间（简化处理）
+          requestTime.value = new Date().toLocaleString('zh-CN')
+          
+          // 计算预计充电时长
+          const hours = requestedAmount.value / (chargeMode.value === 'fast' ? 30 : 7)
+          const wholeHours = Math.floor(hours)
+          const minutes = Math.round((hours - wholeHours) * 60)
+          estimatedDuration.value = `${wholeHours}小时${minutes}分钟`
+        }
+      } else {
+        // 用户没有充电活动
+        hasChargingData.value = false
+      }
+    } else {
+      hasChargingData.value = false
+    }
     
-    // 处理电价信息
-    currentPrice.value = 1.0
-    
-    // 更新当前时段
+    // 处理电价信息 - 更新当前时段
     const currentHour = new Date().getHours()
+    currentPrice.value = 1.0
+    currentPriceType.value = '平时'
+    
     priceSchedule.value.forEach(price => {
       const [start, end] = price.timeRange.split(' - ').map(t => parseInt(t.split(':')[0]))
-      price.isCurrent = (currentHour >= start && currentHour < end) || 
-                         (start > end && (currentHour >= start || currentHour < end))
+      const isCurrent = (start <= end && currentHour >= start && currentHour < end) || 
+                        (start > end && (currentHour >= start || currentHour < end))
+      price.isCurrent = isCurrent
+      
+      if (isCurrent) {
+        currentPrice.value = price.price
+        currentPriceType.value = price.type
+      }
     })
     
   } catch (error) {
     console.error('获取充电状态失败:', error)
+    hasChargingData.value = false
   } finally {
     loading.value = false
   }
@@ -280,12 +354,40 @@ const stopCharging = async () => {
   try {
     isSubmitting.value = true
     
-    // 模拟API调用
-    await new Promise(resolve => setTimeout(resolve, 1000))
+    const userJson = localStorage.getItem('currentUser')
+    if (!userJson) {
+      throw new Error('未找到用户信息')
+    }
     
-    // 实际应用中应该重定向到详单页面
-    alert('充电已结束，正在生成详单...')
-    router.push('/bill-records')
+    const user = JSON.parse(userJson)
+    
+    // 首先获取当前状态以获取requestId
+    const statusResponse = await axios.get(`${API_BASE_URL}/api/charging/current`, {
+      headers: {
+        'X-Username': user.username
+      }
+    })
+    
+    if (statusResponse.data.code === 200 && statusResponse.data.data.queue?.requestId) {
+      // 调用取消API来停止充电
+      const response = await axios.post(`${API_BASE_URL}/api/queue/cancel`, {
+        requestId: statusResponse.data.data.queue.requestId
+      }, {
+        headers: {
+          'X-Username': user.username
+        }
+      })
+
+      if (response.data.code === 200) {
+        alert('充电已结束！')
+        hasChargingData.value = false
+        router.push('/user-dashboard')
+      } else {
+        throw new Error(response.data.message)
+      }
+    } else {
+      throw new Error('无法获取充电信息')
+    }
     
   } catch (error) {
     console.error('结束充电错误:', error)
@@ -301,11 +403,40 @@ const cancelRequest = async () => {
   try {
     isSubmitting.value = true
     
-    // 模拟API调用
-    await new Promise(resolve => setTimeout(resolve, 1000))
+    const userJson = localStorage.getItem('currentUser')
+    if (!userJson) {
+      throw new Error('未找到用户信息')
+    }
     
-    hasChargingData.value = false
-    alert('充电请求已取消')
+    const user = JSON.parse(userJson)
+    
+    // 首先获取当前状态以获取requestId
+    const statusResponse = await axios.get(`${API_BASE_URL}/api/charging/current`, {
+      headers: {
+        'X-Username': user.username
+      }
+    })
+    
+    if (statusResponse.data.code === 200 && statusResponse.data.data.queue?.requestId) {
+      // 调用取消API
+      const response = await axios.post(`${API_BASE_URL}/api/queue/cancel`, {
+        requestId: statusResponse.data.data.queue.requestId
+      }, {
+        headers: {
+          'X-Username': user.username
+        }
+      })
+
+      if (response.data.code === 200) {
+        hasChargingData.value = false
+        alert('充电请求已取消')
+        router.push('/user-dashboard')
+      } else {
+        throw new Error(response.data.message)
+      }
+    } else {
+      throw new Error('无法获取请求信息')
+    }
     
   } catch (error) {
     console.error('取消请求错误:', error)

@@ -243,6 +243,51 @@ def get_user_info():
         logger.error(f"获取用户信息时发生错误: {str(e)}")
         return error_response("服务器内部错误", 500)
 
+@app.route('/api/user/statistics', methods=['GET'])
+def get_user_statistics():
+    """获取用户统计信息"""
+    try:
+        username = request.headers.get('X-Username')
+        if not username:
+            return error_response("未提供用户信息", 401)
+        
+        # 获取用户充电历史统计
+        try:
+            sessions = charging_process_service.get_user_session_history(username, 100)  # 获取最近100条记录
+            
+            charge_count = len(sessions)
+            total_energy = 0.0
+            total_cost = 0.0
+            
+            for session in sessions:
+                if session.status.value == "COMPLETED":
+                    total_energy += session.actual_amount or 0
+                    # 计算费用 (简化计算: 电费 + 服务费)
+                    amount = session.actual_amount or 0
+                    session_cost = amount * 1.5  # 假设平均费用1.5元/度
+                    total_cost += session_cost
+            
+            statistics = {
+                "chargeCount": charge_count,
+                "totalEnergy": round(total_energy, 1),
+                "totalCost": round(total_cost, 2)
+            }
+            
+            return success_response("获取用户统计成功", statistics)
+            
+        except Exception as e:
+            logger.warning(f"获取充电历史失败，返回默认统计: {e}")
+            # 如果获取历史失败，返回默认值
+            return success_response("获取用户统计成功", {
+                "chargeCount": 0,
+                "totalEnergy": 0,
+                "totalCost": 0.00
+            })
+    
+    except Exception as e:
+        logger.error(f"获取用户统计时发生错误: {str(e)}")
+        return error_response("获取用户统计失败", 500)
+
 @app.route('/api/users', methods=['GET'])
 def get_all_users():
     """获取所有用户列表接口（管理员功能）"""
@@ -537,26 +582,33 @@ def get_current_charging_status():
         session = charging_process_service.get_user_active_session(username)
         
         if session:
-            # 用户有活跃的充电会话，同时获取队列状态信息
+            # 用户有活跃的充电会话，格式化为前端期望的格式
             queue_status = queue_service.get_queue_status(username)
             
+            # 获取充电桩名称
+            pile_name = f"快充桩 {session.pile_id}" if session.pile_id in ["A", "B"] else f"慢充桩 {session.pile_id}"
+            
+            # 计算充电进度
+            progress_percent = 0
+            if session.requested_amount > 0:
+                current_amount = session.current_amount or 0
+                progress_percent = min((current_amount / session.requested_amount) * 100, 100)
+            
+            charging_status = {
+                "hasActiveCharging": True,
+                "activePile": pile_name,
+                "chargedAmount": round(session.current_amount or 0, 1),
+                "progressPercent": round(progress_percent, 1),
+                "startTime": session.start_time.isoformat() if session.start_time else "",
+                "estimatedEndTime": session.estimated_end_time.isoformat() if session.estimated_end_time else "",
+                "status": "charging"
+            }
+            
+            # 如果还需要队列信息（用于取消等功能），也包含进去
             if queue_status:
-                return success_response("获取充电状态成功", {
-                    "hasActiveCharging": True,
-                    "status": "charging",
-                    "queue": queue_status
-                })
-            else:
-                # 如果无法获取队列状态，返回会话信息
-                session_data = session.to_dict()
-                session_data["remainingTime"] = session.get_remaining_time() or 0
-                session_data["chargingSpeed"] = session.get_charging_speed()
-                
-                return success_response("获取充电状态成功", {
-                    "hasActiveCharging": True,
-                    "status": "charging",
-                    "session": session_data
-                })
+                charging_status["queue"] = queue_status
+            
+            return success_response("获取充电状态成功", charging_status)
         
         # 如果没有活跃充电会话，检查是否有排队请求
         queue_status = queue_service.get_queue_status(username)
