@@ -126,7 +126,7 @@
         <!-- 车辆等待信息 -->
         <div class="dashboard-section">
           <div class="section-title">
-            <h2>车辆等待队列</h2>
+            <h2>车辆服务队列</h2>
             <!-- <div class="subtitle">查看等候服务的车辆信息</div> -->
           </div>
 

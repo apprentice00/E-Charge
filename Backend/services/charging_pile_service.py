@@ -48,6 +48,8 @@ class ChargingPileService:
     def get_all_piles(self) -> List[Dict[str, Any]]:
         """获取所有充电桩信息"""
         with self._lock:
+            # 同步调度系统状态
+            self._sync_with_dispatch_system()
             return [pile.to_dict() for pile in self.piles.values()]
     
     def get_piles_by_type(self, pile_type: PileType) -> List[ChargingPile]:
@@ -207,6 +209,46 @@ class ChargingPileService:
         if pile_id in self._charging_threads:
             # 线程会自动退出，只需清理记录
             del self._charging_threads[pile_id]
+    
+    def _sync_with_dispatch_system(self):
+        """与调度系统同步状态"""
+        try:
+            from services.dispatch_service import dispatch_service
+            
+            # 遍历所有充电桩，同步调度系统状态
+            for pile_id, pile in self.piles.items():
+                if pile_id in dispatch_service.pile_queues:
+                    pile_queue = dispatch_service.pile_queues[pile_id]
+                    
+                    # 如果调度系统中有车辆正在充电
+                    if pile_queue.charging_car and pile_queue.current_session:
+                        charging_car = pile_queue.charging_car
+                        current_session = pile_queue.current_session
+                        
+                        # 更新充电桩状态为充电中
+                        if pile.status != PileStatus.CHARGING:
+                            pile.status = PileStatus.CHARGING
+                            pile.current_user = charging_car.user_id
+                            pile.current_session = {
+                                "user_id": charging_car.user_id,
+                                "requested_amount": charging_car.requested_amount,
+                                "current_amount": current_session.current_amount or 0,
+                                "start_time": current_session.start_time or datetime.now(),
+                                "progress_percent": min(100, (current_session.current_amount or 0) / charging_car.requested_amount * 100)
+                            }
+                    
+                    # 如果调度系统中没有车辆充电，但充电桩显示在充电
+                    elif not pile_queue.charging_car and pile.status == PileStatus.CHARGING:
+                        # 重置充电桩状态
+                        if pile.is_active:
+                            pile.status = PileStatus.ACTIVE
+                        pile.current_user = None
+                        pile.current_session = None
+                        
+        except Exception as e:
+            # 避免因为同步失败影响主要功能
+            print(f"同步调度系统状态时出错: {e}")
+            pass
     
     def shutdown(self):
         """关闭服务"""

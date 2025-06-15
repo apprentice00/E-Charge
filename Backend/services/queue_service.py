@@ -400,36 +400,72 @@ class QueueService:
     def get_admin_queue_info(self) -> List[Dict[str, Any]]:
         """获取管理员队列信息"""
         with self._lock:
-            queue_info = self.queue_manager.get_all_queue_info()
             admin_queue = []
+            dispatched_users = set()  # 记录已被调度的用户，避免重复显示
             
-            # 等候区车辆
-            for car_data in queue_info["waitingArea"]:
-                admin_queue.append({
-                    "id": len(admin_queue) + 1,
-                    "pileName": "等候区",
-                    "userId": car_data["userId"],
-                    "batteryCapacity": car_data["batteryCapacity"],
-                    "requestedCharge": car_data["requestedAmount"],
-                    "queueTime": car_data["queueTime"],
-                    "status": "等候中",
-                    "statusClass": "waiting"
-                })
-            
-            # 充电桩队列车辆
-            for pile_id, pile_queue in queue_info["pileQueues"].items():
-                pile_name = f"{'快充桩' if pile_id in ['A', 'B'] else '慢充桩'} {pile_id}"
+            # 首先从调度系统获取实际的充电和队列状态
+            try:
+                from services.dispatch_service import dispatch_service
                 
-                for car_data in pile_queue:
+                # 获取调度系统中的车辆状态
+                for pile_id, pile_queue in dispatch_service.pile_queues.items():
+                    pile_name = f"{'快充桩' if pile_id in ['A', 'B'] else '慢充桩'} {pile_id}"
+                    
+                    # 正在充电的车辆
+                    if pile_queue.charging_car:
+                        car = pile_queue.charging_car
+                        dispatched_users.add(car.user_id)  # 标记为已调度
+                        
+                        admin_queue.append({
+                            "id": len(admin_queue) + 1,
+                            "pileName": pile_name,
+                            "userId": car.user_id,
+                            "batteryCapacity": getattr(car, 'battery_capacity', 60),
+                            "requestedCharge": car.requested_amount,
+                            "queueTime": "0分钟",  # 正在充电的车辆等待时间为0
+                            "status": "充电中",
+                            "statusClass": "charging"
+                        })
+                    
+                    # 在充电桩队列等待的车辆
+                    if pile_queue.waiting_car:
+                        car = pile_queue.waiting_car
+                        dispatched_users.add(car.user_id)  # 标记为已调度
+                        
+                        wait_time = ""
+                        if hasattr(car, 'join_time') and car.join_time:
+                            elapsed = datetime.now() - car.join_time
+                            minutes = int(elapsed.total_seconds() / 60)
+                            wait_time = f"{minutes}分钟"
+                        
+                        admin_queue.append({
+                            "id": len(admin_queue) + 1,
+                            "pileName": pile_name,
+                            "userId": car.user_id,
+                            "batteryCapacity": getattr(car, 'battery_capacity', 60),
+                            "requestedCharge": car.requested_amount,
+                            "queueTime": wait_time,
+                            "status": "排队中(第1位)",
+                            "statusClass": "waiting"
+                        })
+                
+            except Exception as e:
+                print(f"获取调度系统状态时出错: {e}")
+            
+            # 然后获取等候区的车辆（仅显示未被调度的）
+            queue_info = self.queue_manager.get_all_queue_info()
+            for car_data in queue_info["waitingArea"]:
+                # 只显示未被调度到充电桩的用户
+                if car_data["userId"] not in dispatched_users:
                     admin_queue.append({
                         "id": len(admin_queue) + 1,
-                        "pileName": pile_name,
+                        "pileName": "等候区",
                         "userId": car_data["userId"],
                         "batteryCapacity": car_data["batteryCapacity"],
                         "requestedCharge": car_data["requestedAmount"],
                         "queueTime": car_data["queueTime"],
-                        "status": car_data["status"],
-                        "statusClass": car_data["statusClass"]
+                        "status": "等候中",
+                        "statusClass": "waiting"
                     })
             
             return admin_queue
@@ -466,15 +502,47 @@ class QueueService:
     def get_statistics(self) -> Dict[str, Any]:
         """获取排队统计信息"""
         with self._lock:
-            queue_stats = self.queue_manager.get_statistics()
-            pile_stats = charging_pile_service.get_statistics()
+            # 重新计算真实的排队统计
+            total_queued = 0
+            charging_count = 0
+            waiting_area_count = 0
+            
+            try:
+                # 从调度系统获取实际统计
+                from services.dispatch_service import dispatch_service
+                
+                # 统计调度系统中的车辆
+                for pile_id, pile_queue in dispatch_service.pile_queues.items():
+                    if pile_queue.charging_car:
+                        charging_count += 1
+                        total_queued += 1
+                    if pile_queue.waiting_car:
+                        total_queued += 1
+                
+                # 统计等候区车辆
+                queue_info = self.queue_manager.get_all_queue_info()
+                waiting_area_count = len(queue_info["waitingArea"])
+                total_queued += waiting_area_count
+                
+            except Exception as e:
+                print(f"获取统计信息时出错: {e}")
+                # 如果调度系统获取失败，使用原始统计
+                queue_stats = self.queue_manager.get_statistics()
+                pile_stats = charging_pile_service.get_statistics()
+                return {
+                    "totalQueuedCars": queue_stats["totalCount"],
+                    "waitingAreaCount": queue_stats["waitingAreaCount"],
+                    "fastQueueCount": queue_stats["fastQueueCount"],
+                    "slowQueueCount": queue_stats["slowQueueCount"],
+                    "chargingCount": pile_stats.get("chargingPiles", 0)
+                }
             
             return {
-                "totalQueuedCars": queue_stats["totalCount"],
-                "waitingAreaCount": queue_stats["waitingAreaCount"],
-                "fastQueueCount": queue_stats["fastQueueCount"],
-                "slowQueueCount": queue_stats["slowQueueCount"],
-                "chargingCount": pile_stats.get("chargingPiles", 0)
+                "totalQueuedCars": total_queued,
+                "waitingAreaCount": waiting_area_count,
+                "fastQueueCount": 0,  # 可以进一步细化统计
+                "slowQueueCount": 0,  # 可以进一步细化统计
+                "chargingCount": charging_count
             }
 
 # 全局单例实例
