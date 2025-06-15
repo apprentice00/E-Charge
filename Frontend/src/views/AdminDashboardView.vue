@@ -430,10 +430,12 @@ const fetchWaitingCars = async () => {
   try {
     const response = await axios.get(`${API_BASE_URL}/admin/queue`)
     if (response.data.code === 200) {
-      waitingCars.value = response.data.data.cars
+      waitingCars.value = response.data.data.cars || []
     }
   } catch (error) {
     console.error('获取等待队列失败:', error)
+    // 使用空数组作为后备
+    waitingCars.value = []
   }
 }
 
@@ -508,11 +510,19 @@ const getBarHeight = (report: ReportData) => {
 // 登出
 const logout = async () => {
   try {
+    // 尝试调用后端登出API
     await axios.post(`${API_BASE_URL}/logout`)
-    localStorage.removeItem('currentUser')
-    router.push('/')
   } catch (error) {
-    console.error('登出失败:', error)
+    console.error('后端登出API调用失败:', error)
+    // 继续执行本地登出，因为用户体验更重要
+  } finally {
+    // 无论后端API是否成功，都执行本地登出
+    localStorage.removeItem('currentUser')
+    // 清除其他可能的用户数据
+    localStorage.removeItem('userSession')
+    localStorage.removeItem('authToken')
+    // 跳转到登录页面
+    router.push('/')
   }
 }
 

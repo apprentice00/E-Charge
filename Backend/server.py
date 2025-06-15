@@ -491,6 +491,63 @@ def get_admin_reports():
         logger.error(f"获取报表数据时发生错误: {str(e)}")
         return error_response("获取报表数据失败", 500)
 
+@app.route('/api/admin/piles/<int:pile_id>/details', methods=['GET'])
+def get_admin_pile_details(pile_id):
+    """获取充电桩详情"""
+    try:
+        # 将数字ID转换为字符串ID
+        char_id = chr(ord('A') + pile_id - 1)  # 1->A, 2->B, 3->C, 4->D, 5->E
+        
+        pile = charging_pile_service.get_pile(char_id)
+        if not pile:
+            return error_response("充电桩不存在", 404)
+        
+        pile_data = pile.to_dict()
+        
+        # 获取当前充电信息
+        current_charging = None
+        if pile.current_session:
+            current_charging = {
+                "username": pile.current_session.get("user_id", ""),
+                "startTime": pile.current_session.get("start_time", "").isoformat() if pile.current_session.get("start_time") else "",
+                "chargedAmount": round(pile.current_session.get("current_amount", 0), 1),
+                "progressPercent": round(pile.current_session.get("progress_percent", 0), 1)
+            }
+        
+        # 获取等待队列信息
+        queue_status = queue_service.get_queue_status_for_pile(char_id)
+        queue_list = []
+        if queue_status:
+            for user_request in queue_status.get("waitingCars", []):
+                queue_list.append({
+                    "username": user_request.get("username", ""),
+                    "requestedCharge": user_request.get("requestedCharge", 0),
+                    "queueTime": user_request.get("queueTime", "")
+                })
+        
+        # 格式化响应数据
+        details = {
+            "pileId": pile_id,
+            "name": pile_data["name"],
+            "isActive": pile_data["isActive"],
+            "totalCharges": pile_data["totalCharges"],
+            "totalHours": pile_data["totalHours"],
+            "totalEnergy": pile_data["totalEnergy"],
+            "queueCount": pile_data["queueCount"],
+            "currentCharging": current_charging,
+            "queueList": queue_list,
+            "power": pile.power,
+            "type": pile.pile_type.value,
+            "status": pile.status.value,
+            "faultStatus": pile_data.get("faultStatus")
+        }
+        
+        return success_response("获取充电桩详情成功", details)
+    
+    except Exception as e:
+        logger.error(f"获取充电桩详情时发生错误: {str(e)}")
+        return error_response("获取充电桩详情失败", 500)
+
 @app.route('/api/admin/faults', methods=['GET'])
 def get_admin_faults():
     """获取故障信息"""

@@ -434,6 +434,35 @@ class QueueService:
             
             return admin_queue
     
+    def get_queue_status_for_pile(self, pile_id: str) -> Optional[Dict[str, Any]]:
+        """获取特定充电桩的队列状态"""
+        with self._lock:
+            try:
+                from services.dispatch_service import dispatch_service
+                
+                if pile_id not in dispatch_service.pile_queues:
+                    return None
+                
+                pile_queue = dispatch_service.pile_queues[pile_id]
+                waiting_cars = []
+                
+                # 获取等待车辆信息
+                if pile_queue.waiting_car:
+                    waiting_cars.append({
+                        "username": pile_queue.waiting_car.user_id,
+                        "requestedCharge": pile_queue.waiting_car.requested_amount,
+                        "queueTime": f"{int((datetime.now() - pile_queue.waiting_car.create_time).total_seconds() / 60)}分钟"
+                    })
+                
+                return {
+                    "pileId": pile_id,
+                    "waitingCars": waiting_cars,
+                    "currentCharging": pile_queue.charging_car.user_id if pile_queue.charging_car else None
+                }
+            except Exception as e:
+                print(f"获取充电桩 {pile_id} 队列状态时出错: {e}")
+                return None
+    
     def get_statistics(self) -> Dict[str, Any]:
         """获取排队统计信息"""
         with self._lock:

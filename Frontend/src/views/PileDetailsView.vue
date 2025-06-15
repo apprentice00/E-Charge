@@ -75,24 +75,22 @@
         <h3>等待车辆</h3>
         <div class="waiting-cars" v-if="waitingCars.length > 0">
           <div class="table-responsive">
-            <table class="cars-table">
-              <thead>
-                <tr>
-                  <th>用户ID</th>
-                  <th>电池容量</th>
-                  <th>请求充电量</th>
-                  <th>排队时长</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="car in waitingCars" :key="car.id">
-                  <td>{{ car.userId }}</td>
-                  <td>{{ car.batteryCapacity }} 度</td>
-                  <td>{{ car.requestedCharge }} 度</td>
-                  <td>{{ car.queueTime }}</td>
-                </tr>
-              </tbody>
-            </table>
+                          <table class="cars-table">
+                <thead>
+                  <tr>
+                    <th>用户ID</th>
+                    <th>请求充电量</th>
+                    <th>排队时长</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(car, index) in waitingCars" :key="index">
+                    <td>{{ car.username }}</td>
+                    <td>{{ car.requestedCharge }} 度</td>
+                    <td>{{ car.queueTime }}</td>
+                  </tr>
+                </tbody>
+              </table>
           </div>
         </div>
         <div class="no-cars" v-else>
@@ -100,34 +98,7 @@
         </div>
       </div>
       
-      <div class="info-section">
-        <h3>使用趋势</h3>
-        <div class="chart-tabs">
-          <button 
-            class="tab-button" 
-            :class="{ active: activeTab === 'daily' }"
-            @click="activeTab = 'daily'">
-            日使用趋势
-          </button>
-          <button 
-            class="tab-button" 
-            :class="{ active: activeTab === 'weekly' }"
-            @click="activeTab = 'weekly'">
-            周使用趋势
-          </button>
-          <button 
-            class="tab-button" 
-            :class="{ active: activeTab === 'monthly' }"
-            @click="activeTab = 'monthly'">
-            月使用趋势
-          </button>
-        </div>
-        
-        <div class="chart-placeholder">
-          <div class="chart-message">图表数据加载中...</div>
-          <div class="chart-hint">此处将显示{{ pile.name }}的{{ getTabText() }}使用数据图表</div>
-        </div>
-      </div>
+
     </div>
     
     <div class="loading" v-else>
@@ -137,167 +108,84 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import axios from 'axios'
+
+// API基础URL
+const API_BASE_URL = 'http://localhost:5000/api'
 
 interface ChargingPile {
-  id: number;
+  pileId: number;
   name: string;
   isActive: boolean;
   totalCharges: number;
   totalHours: number;
   totalEnergy: number;
   queueCount: number;
+  power: number;
+  type: string;
+  status: string;
+  currentCharging?: {
+    username: string;
+    startTime: string;
+    chargedAmount: number;
+    progressPercent: number;
+  };
+  faultStatus?: {
+    isFault: boolean;
+    reason: string;
+    faultTime: string;
+  };
 }
 
 interface WaitingCar {
-  id: number;
-  pileName: string;
-  userId: string;
-  batteryCapacity: number;
+  username: string;
   requestedCharge: number;
   queueTime: string;
-  status: string;
-  statusClass: string;
 }
 
 const router = useRouter()
 const route = useRoute()
 const pile = ref<ChargingPile | null>(null)
 const waitingCars = ref<WaitingCar[]>([])
-const activeTab = ref('daily')
 
 // 获取充电桩数据
-const fetchPileData = () => {
-  // 模拟从API获取数据
-  // 这里使用模拟数据，实际应用中应从后端API获取
-  const pileId = parseInt(route.params.id as string)
-  
-  // 模拟数据
-  const mockPiles = [
-    {
-      id: 1,
-      name: '快充桩 A',
-      isActive: true,
-      totalCharges: 128,
-      totalHours: 215,
-      totalEnergy: 864,
-      queueCount: 3
-    },
-    {
-      id: 2,
-      name: '快充桩 B',
-      isActive: true,
-      totalCharges: 96,
-      totalHours: 190,
-      totalEnergy: 760,
-      queueCount: 2
-    },
-    {
-      id: 3,
-      name: '慢充桩 A',
-      isActive: false,
-      totalCharges: 72,
-      totalHours: 245,
-      totalEnergy: 416,
-      queueCount: 0
-    },
-    {
-      id: 4,
-      name: '慢充桩 B',
-      isActive: true,
-      totalCharges: 68,
-      totalHours: 230,
-      totalEnergy: 392,
-      queueCount: 1
+const fetchPileData = async () => {
+  try {
+    const pileId = parseInt(route.params.id as string)
+    const response = await axios.get(`${API_BASE_URL}/admin/piles/${pileId}/details`)
+    
+    if (response.data.code === 200) {
+      pile.value = response.data.data
+      waitingCars.value = response.data.data.queueList || []
+    } else {
+      console.error('获取充电桩详情失败:', response.data.message)
+      router.push('/admin-dashboard')
     }
-  ]
-  
-  // 查找对应ID的充电桩
-  pile.value = mockPiles.find(p => p.id === pileId) || null
-  
-  // 如果没有找到，可以跳转回管理员仪表盘
-  if (!pile.value) {
+  } catch (error) {
+    console.error('获取充电桩详情失败:', error)
     router.push('/admin-dashboard')
   }
 }
 
-// 获取等待车辆数据
-const fetchWaitingCars = () => {
+// 切换充电桩状态
+const togglePileStatus = async () => {
   if (!pile.value) return
   
-  // 模拟数据
-  const mockWaitingCars = [
-    {
-      id: 1,
-      pileName: '快充桩 A',
-      userId: 'user01',
-      batteryCapacity: 60,
-      requestedCharge: 40,
-      queueTime: '15分钟',
-      status: '排队中',
-      statusClass: 'waiting'
-    },
-    {
-      id: 2,
-      pileName: '快充桩 A',
-      userId: 'user02',
-      batteryCapacity: 80,
-      requestedCharge: 60,
-      queueTime: '8分钟',
-      status: '排队中',
-      statusClass: 'waiting'
-    },
-    {
-      id: 3,
-      pileName: '快充桩 A',
-      userId: 'user05',
-      batteryCapacity: 70,
-      requestedCharge: 30,
-      queueTime: '2分钟',
-      status: '排队中',
-      statusClass: 'waiting'
-    },
-    {
-      id: 4,
-      pileName: '快充桩 B',
-      userId: 'user03',
-      batteryCapacity: 90,
-      requestedCharge: 45,
-      queueTime: '10分钟',
-      status: '排队中',
-      statusClass: 'waiting'
-    },
-    {
-      id: 5,
-      pileName: '快充桩 B',
-      userId: 'user07',
-      batteryCapacity: 60,
-      requestedCharge: 50,
-      queueTime: '3分钟',
-      status: '排队中',
-      statusClass: 'waiting'
-    },
-    {
-      id: 6,
-      pileName: '慢充桩 B',
-      userId: 'user04',
-      batteryCapacity: 80,
-      requestedCharge: 70,
-      queueTime: '5分钟',
-      status: '排队中',
-      statusClass: 'waiting'
-    }
-  ]
-  
-  // 过滤出当前充电桩的等待车辆
-  waitingCars.value = mockWaitingCars.filter(car => car.pileName === pile.value?.name)
-}
+  try {
+    const response = await axios.post(`${API_BASE_URL}/admin/piles/${pile.value.pileId}/status`, {
+      isActive: !pile.value.isActive
+    })
 
-// 切换充电桩状态
-const togglePileStatus = () => {
-  if (pile.value) {
-    pile.value.isActive = !pile.value.isActive
+    if (response.data.code === 200) {
+      pile.value.isActive = !pile.value.isActive
+    } else {
+      alert('更新充电桩状态失败')
+    }
+  } catch (error) {
+    console.error('更新充电桩状态失败:', error)
+    alert('更新充电桩状态失败')
   }
 }
 
@@ -306,23 +194,8 @@ const goBack = () => {
   router.push('/admin-dashboard')
 }
 
-// 获取选项卡文本
-const getTabText = () => {
-  switch (activeTab.value) {
-    case 'daily':
-      return '日'
-    case 'weekly':
-      return '周'
-    case 'monthly':
-      return '月'
-    default:
-      return '日'
-  }
-}
-
 onMounted(() => {
   fetchPileData()
-  fetchWaitingCars()
 })
 </script>
 

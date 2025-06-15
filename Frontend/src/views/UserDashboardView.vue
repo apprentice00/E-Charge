@@ -269,19 +269,18 @@ const navigateTo = (path: string) => {
 
 const logout = async () => {
   try {
-    // 调用登出API
-    const response = await axios.post(`${API_BASE_URL}/api/logout`)
-    if (response.data.code === 200) {
-      // 清除登录状态
-      localStorage.removeItem('currentUser')
-      router.push('/')
-    } else {
-      throw new Error(response.data.message)
-    }
+    // 尝试调用后端登出API
+    await axios.post(`${API_BASE_URL}/logout`)
   } catch (error) {
-    console.error('登出失败:', error)
-    // 即使API调用失败，也清除本地状态并跳转
+    console.error('后端登出API调用失败:', error)
+    // 继续执行本地登出，因为用户体验更重要
+  } finally {
+    // 无论后端API是否成功，都执行本地登出
     localStorage.removeItem('currentUser')
+    // 清除其他可能的用户数据
+    localStorage.removeItem('userSession')
+    localStorage.removeItem('authToken')
+    // 跳转到登录页面
     router.push('/')
   }
 }
